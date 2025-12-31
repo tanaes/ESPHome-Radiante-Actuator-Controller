@@ -21,6 +21,7 @@ ESP32-S3 firmware for a 7-zone radiant floor heating controller using ESPHome. T
 - Adafruit DS2484 I2C-to-1-Wire breakout (address 0x18) for temperature sensors
 - 7x DS18B20 temperature sensors on 1-Wire bus
 - WS2812 RGB status LED (GPIO38)
+- 2.2" ILI9341 TFT display (320x240, SPI)
 
 ## Board Pin Mapping
 
@@ -42,6 +43,12 @@ ESP32-S3 firmware for a 7-zone radiant floor heating controller using ESPHome. T
 | **Relay Outputs** | | Via PCA9554 at 0x20 |
 | DO1-DO7 | pins 0-6 | Zone relays |
 | DO8 | pin 7 | Circulation pump |
+| **TFT Display (ILI9341)** | | SD Card header + GPIO21 |
+| CLK | GPIO48 | SD Card header |
+| MOSI | GPIO47 | SD Card header |
+| CS | GPIO45 | SD Card header |
+| DC | GPIO21 | |
+| RST | - | RC circuit (10kΩ + 1µF) |
 | **Other** | | |
 | RGB LED | GPIO38 | WS2812 |
 | Buzzer | GPIO46 | Available, unused |
@@ -78,6 +85,7 @@ Key sections:
 - `climate:` - 7 thermostat entities with heat deadband control
 - `binary_sensor:` - 7 valve feedback inputs (GPIO4-10) + DI8 reserved
 - `script:` - `update_pump_state` and `set_pump_demand` for pump logic
+- `display:` - ILI9341 TFT showing zone status, temps, relay/valve states, network info
 
 **Pump control logic:** Pump runs when any zone thermostat calls for heat AND that zone's valve feedback confirms open, with configurable start/stop delays to prevent cycling.
 

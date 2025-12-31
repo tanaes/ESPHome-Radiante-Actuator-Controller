@@ -817,3 +817,182 @@ time:
   - platform: sntp
     id: sntp_time
     timezone: America/Los_Angeles
+
+# SPI bus for TFT display (using SD Card header pins)
+spi:
+  - id: display_spi
+    clk_pin: GPIO48   # SD Card header
+    mosi_pin: GPIO47  # SD Card header
+
+# Fonts for display
+font:
+  - file: "gfonts://Roboto"
+    id: font_large
+    size: 16
+  - file: "gfonts://Roboto"
+    id: font_medium
+    size: 12
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 10
+
+# 2.2" ILI9341 TFT Display (320x240)
+# RST pin uses RC auto-reset circuit (10kΩ + 1µF to GND) instead of GPIO
+display:
+  - platform: ili9xxx
+    model: ILI9341
+    spi_id: display_spi
+    cs_pin: GPIO45    # SD Card header
+    dc_pin: GPIO21
+    dimensions: [320, 240]
+    rotation: 0
+    update_interval: 1s
+    lambda: |-
+      // Colors
+      auto WHITE = Color(255, 255, 255);
+      auto BLACK = Color(0, 0, 0);
+      auto RED = Color(255, 0, 0);
+      auto GREEN = Color(0, 255, 0);
+      auto ORANGE = Color(255, 165, 0);
+      auto GRAY = Color(128, 128, 128);
+      auto DARK_GRAY = Color(64, 64, 64);
+
+      // Clear screen
+      it.fill(BLACK);
+
+      // Zone box dimensions: 8 boxes across top (7 zones + pump)
+      int box_width = 40;
+      int box_height = 80;
+      int box_spacing = 0;
+
+      // Draw zone boxes
+      for (int i = 0; i < 7; i++) {
+        int x = i * box_width;
+
+        // Get zone data
+        float temp = 0;
+        bool relay_on = false;
+        bool valve_open = false;
+        bool heating = false;
+
+        switch (i) {
+          case 0:
+            temp = id(zone1_temp).state;
+            relay_on = id(zone1_relay).state;
+            valve_open = id(zone1_valve).state;
+            heating = id(zone1_climate).action == climate::CLIMATE_ACTION_HEATING;
+            break;
+          case 1:
+            temp = id(zone2_temp).state;
+            relay_on = id(zone2_relay).state;
+            valve_open = id(zone2_valve).state;
+            heating = id(zone2_climate).action == climate::CLIMATE_ACTION_HEATING;
+            break;
+          case 2:
+            temp = id(zone3_temp).state;
+            relay_on = id(zone3_relay).state;
+            valve_open = id(zone3_valve).state;
+            heating = id(zone3_climate).action == climate::CLIMATE_ACTION_HEATING;
+            break;
+          case 3:
+            temp = id(zone4_temp).state;
+            relay_on = id(zone4_relay).state;
+            valve_open = id(zone4_valve).state;
+            heating = id(zone4_climate).action == climate::CLIMATE_ACTION_HEATING;
+            break;
+          case 4:
+            temp = id(zone5_temp).state;
+            relay_on = id(zone5_relay).state;
+            valve_open = id(zone5_valve).state;
+            heating = id(zone5_climate).action == climate::CLIMATE_ACTION_HEATING;
+            break;
+          case 5:
+            temp = id(zone6_temp).state;
+            relay_on = id(zone6_relay).state;
+            valve_open = id(zone6_valve).state;
+            heating = id(zone6_climate).action == climate::CLIMATE_ACTION_HEATING;
+            break;
+          case 6:
+            temp = id(zone7_temp).state;
+            relay_on = id(zone7_relay).state;
+            valve_open = id(zone7_valve).state;
+            heating = id(zone7_climate).action == climate::CLIMATE_ACTION_HEATING;
+            break;
+        }
+
+        // Box background color based on heating state
+        Color bg_color = heating ? ORANGE : DARK_GRAY;
+        it.filled_rectangle(x, 0, box_width - 1, box_height, bg_color);
+        it.rectangle(x, 0, box_width - 1, box_height, WHITE);
+
+        // Zone number
+        it.printf(x + 2, 2, id(font_medium), WHITE, "Z%d", i + 1);
+
+        // Temperature
+        if (!std::isnan(temp)) {
+          it.printf(x + 2, 18, id(font_large), WHITE, "%.0f", temp);
+        } else {
+          it.print(x + 2, 18, id(font_medium), GRAY, "--");
+        }
+
+        // Relay status (R: commanded)
+        it.printf(x + 2, 40, id(font_small), relay_on ? GREEN : GRAY, "R:%s", relay_on ? "ON" : "off");
+
+        // Valve status (V: observed)
+        it.printf(x + 2, 52, id(font_small), valve_open ? GREEN : GRAY, "V:%s", valve_open ? "OPN" : "cls");
+
+        // Status indicator
+        if (heating && valve_open) {
+          it.filled_circle(x + box_width/2, 70, 4, GREEN);
+        } else if (heating && !valve_open) {
+          it.filled_circle(x + box_width/2, 70, 4, ORANGE);
+        } else {
+          it.filled_circle(x + box_width/2, 70, 4, DARK_GRAY);
+        }
+      }
+
+      // Pump box (8th position)
+      int pump_x = 7 * box_width;
+      bool pump_on = id(pump_relay).state;
+      Color pump_bg = pump_on ? ORANGE : DARK_GRAY;
+      it.filled_rectangle(pump_x, 0, box_width - 1, box_height, pump_bg);
+      it.rectangle(pump_x, 0, box_width - 1, box_height, WHITE);
+      it.print(pump_x + 4, 2, id(font_medium), WHITE, "PUMP");
+      it.printf(pump_x + 4, 30, id(font_large), pump_on ? GREEN : GRAY, "%s", pump_on ? "ON" : "OFF");
+      it.filled_circle(pump_x + box_width/2, 70, 4, pump_on ? GREEN : DARK_GRAY);
+
+      // Status bar below zones
+      int status_y = box_height + 5;
+
+      // Network status
+      it.print(5, status_y, id(font_medium), WHITE, "Network:");
+      if (ethernet::global_eth_component->is_connected()) {
+        it.print(70, status_y, id(font_medium), GREEN, "ETH");
+        it.printf(100, status_y, id(font_small), WHITE, "%s", ethernet::global_eth_component->get_ip_address().str().c_str());
+      } else if (wifi::global_wifi_component->is_connected()) {
+        it.print(70, status_y, id(font_medium), GREEN, "WiFi");
+        it.printf(110, status_y, id(font_small), WHITE, "%s", wifi::global_wifi_component->get_ip_address().str().c_str());
+      } else {
+        it.print(70, status_y, id(font_medium), RED, "DISCONNECTED");
+      }
+
+      // Pump demand status
+      int demand_y = status_y + 16;
+      it.print(5, demand_y, id(font_medium), WHITE, "Demand:");
+      it.printf(60, demand_y, id(font_medium), id(pump_demand) ? ORANGE : GRAY, "%s", id(pump_demand) ? "ACTIVE" : "idle");
+
+      // Valve summary
+      int any_valve = id(zone1_valve).state || id(zone2_valve).state || id(zone3_valve).state ||
+                      id(zone4_valve).state || id(zone5_valve).state || id(zone6_valve).state ||
+                      id(zone7_valve).state;
+      it.print(140, demand_y, id(font_medium), WHITE, "Valves:");
+      it.printf(195, demand_y, id(font_medium), any_valve ? GREEN : GRAY, "%s", any_valve ? "OPEN" : "closed");
+
+      // Time
+      int time_y = demand_y + 16;
+      if (id(sntp_time).now().is_valid()) {
+        it.strftime(5, time_y, id(font_medium), WHITE, "%Y-%m-%d %H:%M:%S", id(sntp_time).now());
+      }
+
+      // Global setpoint
+      it.printf(200, time_y, id(font_medium), WHITE, "Set: %.0f°F", id(global_setpoint).state);
