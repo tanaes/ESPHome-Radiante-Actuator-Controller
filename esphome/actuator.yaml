@@ -1,0 +1,797 @@
+esphome:
+  name: radiant-heat-controller
+  friendly_name: Radiant Heat Controller
+  on_boot:
+    priority: -100
+    then:
+      # Initialize all zones with global setpoint on boot
+      - lambda: |-
+          auto setpoint = id(global_setpoint).state;
+          id(zone1_climate).target_temperature = setpoint;
+          id(zone2_climate).target_temperature = setpoint;
+          id(zone3_climate).target_temperature = setpoint;
+          id(zone4_climate).target_temperature = setpoint;
+          id(zone5_climate).target_temperature = setpoint;
+          id(zone6_climate).target_temperature = setpoint;
+          id(zone7_climate).target_temperature = setpoint;
+
+# Global variable to track if pump should be running
+globals:
+  - id: pump_demand
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# Ethernet is primary network interface for this board
+ethernet:
+  type: W5500
+  clk_pin: GPIO15
+  mosi_pin: GPIO13
+  miso_pin: GPIO14
+  cs_pin: GPIO16
+  interrupt_pin: GPIO12
+  reset_pin: GPIO17
+
+# WiFi as fallback (optional - comment out if not needed)
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "RadiantHeat Fallback"
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+web_server:
+  port: 80
+
+# I2C bus for TCA9554 (relay expander) and DS2484 (1-wire master)
+i2c:
+  sda: GPIO42
+  scl: GPIO41
+  scan: true
+  frequency: 100kHz
+
+# TCA9554 I/O expander for relay control (address 0x20)
+tca9554:
+  - id: relay_expander
+    address: 0x20
+
+# XL9535 I/O expander for additional zones (OPTIONAL - uncomment when adding expansion board)
+# Address options: 0x20-0x27 depending on A0/A1/A2 pins
+# xl9535:
+#   - id: expansion_relays
+#     address: 0x21  # Use different address than TCA9554
+
+# DS2484 1-wire master for temperature sensors
+one_wire:
+  - platform: ds2484
+    id: onewire_bus
+
+# Global setpoint that can be applied to all zones
+number:
+  - platform: template
+    name: "Global Setpoint"
+    id: global_setpoint
+    unit_of_measurement: "°F"
+    device_class: temperature
+    optimistic: true
+    min_value: 50
+    max_value: 85
+    step: 0.5
+    initial_value: 68
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            // Only apply to zones that haven't been individually overridden
+            // Users can set per-zone temps via HA which won't be overwritten
+            ESP_LOGI("thermostat", "Global setpoint changed to %.1f°F", x);
+
+  - platform: template
+    name: "Apply Global Setpoint"
+    id: apply_global_trigger
+    unit_of_measurement: ""
+    optimistic: true
+    min_value: 0
+    max_value: 1
+    step: 1
+    initial_value: 0
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return x == 1;'
+            then:
+              - lambda: |-
+                  auto setpoint = id(global_setpoint).state;
+                  id(zone1_climate).target_temperature = setpoint;
+                  id(zone2_climate).target_temperature = setpoint;
+                  id(zone3_climate).target_temperature = setpoint;
+                  id(zone4_climate).target_temperature = setpoint;
+                  id(zone5_climate).target_temperature = setpoint;
+                  id(zone6_climate).target_temperature = setpoint;
+                  id(zone7_climate).target_temperature = setpoint;
+                  ESP_LOGI("thermostat", "Applied global setpoint %.1f°F to all zones", setpoint);
+              - number.set:
+                  id: apply_global_trigger
+                  value: 0
+
+  - platform: template
+    name: "Pump Start Delay"
+    id: pump_start_delay
+    unit_of_measurement: "s"
+    optimistic: true
+    min_value: 0
+    max_value: 60
+    step: 1
+    initial_value: 5
+    restore_value: true
+
+  - platform: template
+    name: "Pump Stop Delay"
+    id: pump_stop_delay
+    unit_of_measurement: "s"
+    optimistic: true
+    min_value: 0
+    max_value: 300
+    step: 5
+    initial_value: 30
+    restore_value: true
+
+# Hysteresis setting (configurable deadband)
+  - platform: template
+    name: "Thermostat Hysteresis"
+    id: hysteresis
+    unit_of_measurement: "°F"
+    optimistic: true
+    min_value: 0.5
+    max_value: 5
+    step: 0.5
+    initial_value: 1.0
+    restore_value: true
+
+# Internal relay switches via TCA9554 expander
+switch:
+  - platform: gpio
+    name: "Zone 1 Relay"
+    id: zone1_relay
+    pin:
+      tca9554: relay_expander
+      number: 0
+      mode: OUTPUT
+    restore_mode: RESTORE_DEFAULT_OFF
+    internal: true
+
+  - platform: gpio
+    name: "Zone 2 Relay"
+    id: zone2_relay
+    pin:
+      tca9554: relay_expander
+      number: 1
+      mode: OUTPUT
+    restore_mode: RESTORE_DEFAULT_OFF
+    internal: true
+
+  - platform: gpio
+    name: "Zone 3 Relay"
+    id: zone3_relay
+    pin:
+      tca9554: relay_expander
+      number: 2
+      mode: OUTPUT
+    restore_mode: RESTORE_DEFAULT_OFF
+    internal: true
+
+  - platform: gpio
+    name: "Zone 4 Relay"
+    id: zone4_relay
+    pin:
+      tca9554: relay_expander
+      number: 3
+      mode: OUTPUT
+    restore_mode: RESTORE_DEFAULT_OFF
+    internal: true
+
+  - platform: gpio
+    name: "Zone 5 Relay"
+    id: zone5_relay
+    pin:
+      tca9554: relay_expander
+      number: 4
+      mode: OUTPUT
+    restore_mode: RESTORE_DEFAULT_OFF
+    internal: true
+
+  - platform: gpio
+    name: "Zone 6 Relay"
+    id: zone6_relay
+    pin:
+      tca9554: relay_expander
+      number: 5
+      mode: OUTPUT
+    restore_mode: RESTORE_DEFAULT_OFF
+    internal: true
+
+  - platform: gpio
+    name: "Zone 7 Relay"
+    id: zone7_relay
+    pin:
+      tca9554: relay_expander
+      number: 6
+      mode: OUTPUT
+    restore_mode: RESTORE_DEFAULT_OFF
+    internal: true
+
+  # Relay 8 (index 7) is used for circulation pump control
+  - platform: gpio
+    name: "Circulation Pump Relay"
+    id: pump_relay
+    pin:
+      tca9554: relay_expander
+      number: 7
+      mode: OUTPUT
+    restore_mode: RESTORE_DEFAULT_OFF
+    internal: true
+
+# Expansion zone relays via XL9535 (OPTIONAL - uncomment when adding expansion board)
+# switch (continued):
+#   - platform: gpio
+#     name: "Zone 8 Relay"
+#     id: zone8_relay
+#     pin:
+#       xl9535: expansion_relays
+#       number: 0
+#       mode: OUTPUT
+#     restore_mode: RESTORE_DEFAULT_OFF
+#     internal: true
+#   - platform: gpio
+#     name: "Zone 9 Relay"
+#     id: zone9_relay
+#     pin:
+#       xl9535: expansion_relays
+#       number: 1
+#       mode: OUTPUT
+#     restore_mode: RESTORE_DEFAULT_OFF
+#     internal: true
+#   # ... continue for zones 10-16 on pins 2-7 and 8-15
+
+# Dallas/DS18B20 temperature sensors on the 1-wire bus
+# NOTE: Replace the 0x0000000000000000 addresses with your actual sensor addresses
+# Run once with these placeholders, check logs for discovered addresses, then update
+sensor:
+  - platform: dallas_temp
+    one_wire_id: onewire_bus
+    address: 0x0000000000000001  # Replace with actual address
+    name: "Zone 1 Temperature"
+    id: zone1_temp
+    unit_of_measurement: "°F"
+    filters:
+      - lambda: return x * 9.0/5.0 + 32.0;  # Convert C to F
+    on_value:
+      then:
+        - lambda: |-
+            id(zone1_climate).current_temperature = x;
+
+  - platform: dallas_temp
+    one_wire_id: onewire_bus
+    address: 0x0000000000000002  # Replace with actual address
+    name: "Zone 2 Temperature"
+    id: zone2_temp
+    unit_of_measurement: "°F"
+    filters:
+      - lambda: return x * 9.0/5.0 + 32.0;
+    on_value:
+      then:
+        - lambda: |-
+            id(zone2_climate).current_temperature = x;
+
+  - platform: dallas_temp
+    one_wire_id: onewire_bus
+    address: 0x0000000000000003  # Replace with actual address
+    name: "Zone 3 Temperature"
+    id: zone3_temp
+    unit_of_measurement: "°F"
+    filters:
+      - lambda: return x * 9.0/5.0 + 32.0;
+    on_value:
+      then:
+        - lambda: |-
+            id(zone3_climate).current_temperature = x;
+
+  - platform: dallas_temp
+    one_wire_id: onewire_bus
+    address: 0x0000000000000004  # Replace with actual address
+    name: "Zone 4 Temperature"
+    id: zone4_temp
+    unit_of_measurement: "°F"
+    filters:
+      - lambda: return x * 9.0/5.0 + 32.0;
+    on_value:
+      then:
+        - lambda: |-
+            id(zone4_climate).current_temperature = x;
+
+  - platform: dallas_temp
+    one_wire_id: onewire_bus
+    address: 0x0000000000000005  # Replace with actual address
+    name: "Zone 5 Temperature"
+    id: zone5_temp
+    unit_of_measurement: "°F"
+    filters:
+      - lambda: return x * 9.0/5.0 + 32.0;
+    on_value:
+      then:
+        - lambda: |-
+            id(zone5_climate).current_temperature = x;
+
+  - platform: dallas_temp
+    one_wire_id: onewire_bus
+    address: 0x0000000000000006  # Replace with actual address
+    name: "Zone 6 Temperature"
+    id: zone6_temp
+    unit_of_measurement: "°F"
+    filters:
+      - lambda: return x * 9.0/5.0 + 32.0;
+    on_value:
+      then:
+        - lambda: |-
+            id(zone6_climate).current_temperature = x;
+
+  - platform: dallas_temp
+    one_wire_id: onewire_bus
+    address: 0x0000000000000007  # Replace with actual address
+    name: "Zone 7 Temperature"
+    id: zone7_temp
+    unit_of_measurement: "°F"
+    filters:
+      - lambda: return x * 9.0/5.0 + 32.0;
+    on_value:
+      then:
+        - lambda: |-
+            id(zone7_climate).current_temperature = x;
+
+# Zone 8 sensor available for expansion via XL9535
+# Uncomment and add address when expansion board is installed
+#   - platform: dallas_temp
+#     one_wire_id: onewire_bus
+#     address: 0x0000000000000008  # Replace with actual address
+#     name: "Zone 8 Temperature"
+#     id: zone8_temp
+#     unit_of_measurement: "°F"
+#     filters:
+#       - lambda: return x * 9.0/5.0 + 32.0;
+#     on_value:
+#       then:
+#         - lambda: |-
+#             id(zone8_climate).current_temperature = x;
+
+# Thermostat climate entities for each zone
+climate:
+  - platform: thermostat
+    name: "Zone 1 Thermostat"
+    id: zone1_climate
+    sensor: zone1_temp
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 68 °F
+    min_heating_off_time: 60s
+    min_heating_run_time: 60s
+    min_idle_time: 30s
+    heat_deadband: 1 °F
+    heat_overrun: 0 °F
+    heat_action:
+      - switch.turn_on: zone1_relay
+      - script.execute: set_pump_demand
+    idle_action:
+      - switch.turn_off: zone1_relay
+      - script.execute: set_pump_demand
+    visual:
+      min_temperature: 50 °F
+      max_temperature: 85 °F
+      temperature_step: 0.5 °F
+
+  - platform: thermostat
+    name: "Zone 2 Thermostat"
+    id: zone2_climate
+    sensor: zone2_temp
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 68 °F
+    min_heating_off_time: 60s
+    min_heating_run_time: 60s
+    min_idle_time: 30s
+    heat_deadband: 1 °F
+    heat_overrun: 0 °F
+    heat_action:
+      - switch.turn_on: zone2_relay
+      - script.execute: set_pump_demand
+    idle_action:
+      - switch.turn_off: zone2_relay
+      - script.execute: set_pump_demand
+    visual:
+      min_temperature: 50 °F
+      max_temperature: 85 °F
+      temperature_step: 0.5 °F
+
+  - platform: thermostat
+    name: "Zone 3 Thermostat"
+    id: zone3_climate
+    sensor: zone3_temp
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 68 °F
+    min_heating_off_time: 60s
+    min_heating_run_time: 60s
+    min_idle_time: 30s
+    heat_deadband: 1 °F
+    heat_overrun: 0 °F
+    heat_action:
+      - switch.turn_on: zone3_relay
+      - script.execute: set_pump_demand
+    idle_action:
+      - switch.turn_off: zone3_relay
+      - script.execute: set_pump_demand
+    visual:
+      min_temperature: 50 °F
+      max_temperature: 85 °F
+      temperature_step: 0.5 °F
+
+  - platform: thermostat
+    name: "Zone 4 Thermostat"
+    id: zone4_climate
+    sensor: zone4_temp
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 68 °F
+    min_heating_off_time: 60s
+    min_heating_run_time: 60s
+    min_idle_time: 30s
+    heat_deadband: 1 °F
+    heat_overrun: 0 °F
+    heat_action:
+      - switch.turn_on: zone4_relay
+      - script.execute: set_pump_demand
+    idle_action:
+      - switch.turn_off: zone4_relay
+      - script.execute: set_pump_demand
+    visual:
+      min_temperature: 50 °F
+      max_temperature: 85 °F
+      temperature_step: 0.5 °F
+
+  - platform: thermostat
+    name: "Zone 5 Thermostat"
+    id: zone5_climate
+    sensor: zone5_temp
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 68 °F
+    min_heating_off_time: 60s
+    min_heating_run_time: 60s
+    min_idle_time: 30s
+    heat_deadband: 1 °F
+    heat_overrun: 0 °F
+    heat_action:
+      - switch.turn_on: zone5_relay
+      - script.execute: set_pump_demand
+    idle_action:
+      - switch.turn_off: zone5_relay
+      - script.execute: set_pump_demand
+    visual:
+      min_temperature: 50 °F
+      max_temperature: 85 °F
+      temperature_step: 0.5 °F
+
+  - platform: thermostat
+    name: "Zone 6 Thermostat"
+    id: zone6_climate
+    sensor: zone6_temp
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 68 °F
+    min_heating_off_time: 60s
+    min_heating_run_time: 60s
+    min_idle_time: 30s
+    heat_deadband: 1 °F
+    heat_overrun: 0 °F
+    heat_action:
+      - switch.turn_on: zone6_relay
+      - script.execute: set_pump_demand
+    idle_action:
+      - switch.turn_off: zone6_relay
+      - script.execute: set_pump_demand
+    visual:
+      min_temperature: 50 °F
+      max_temperature: 85 °F
+      temperature_step: 0.5 °F
+
+  - platform: thermostat
+    name: "Zone 7 Thermostat"
+    id: zone7_climate
+    sensor: zone7_temp
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 68 °F
+    min_heating_off_time: 60s
+    min_heating_run_time: 60s
+    min_idle_time: 30s
+    heat_deadband: 1 °F
+    heat_overrun: 0 °F
+    heat_action:
+      - switch.turn_on: zone7_relay
+      - script.execute: set_pump_demand
+    idle_action:
+      - switch.turn_off: zone7_relay
+      - script.execute: set_pump_demand
+    visual:
+      min_temperature: 50 °F
+      max_temperature: 85 °F
+      temperature_step: 0.5 °F
+
+# Zone 8 thermostat available for expansion via XL9535
+# Uncomment when expansion board is installed
+#   - platform: thermostat
+#     name: "Zone 8 Thermostat"
+#     id: zone8_climate
+#     sensor: zone8_temp
+#     default_preset: Home
+#     preset:
+#       - name: Home
+#         default_target_temperature_low: 68 °F
+#     min_heating_off_time: 60s
+#     min_heating_run_time: 60s
+#     min_idle_time: 30s
+#     heat_deadband: 1 °F
+#     heat_overrun: 0 °F
+#     heat_action:
+#       - switch.turn_on: zone8_relay
+#     idle_action:
+#       - switch.turn_off: zone8_relay
+#     visual:
+#       min_temperature: 50 °F
+#       max_temperature: 85 °F
+#       temperature_step: 0.5 °F
+
+# Valve feedback sensors (active when valve is open)
+# These are used to interlock the circulation pump - pump only runs when at least one valve is confirmed open
+binary_sensor:
+  - platform: status
+    name: "Controller Status"
+
+  - platform: gpio
+    pin:
+      number: GPIO4
+      mode: INPUT
+      inverted: true  # Active low
+    name: "Zone 1 Valve Open"
+    id: zone1_valve
+    device_class: opening
+    on_state:
+      then:
+        - script.execute: update_pump_state
+
+  - platform: gpio
+    pin:
+      number: GPIO5
+      mode: INPUT
+      inverted: true  # Active low
+    name: "Zone 2 Valve Open"
+    id: zone2_valve
+    device_class: opening
+    on_state:
+      then:
+        - script.execute: update_pump_state
+
+  - platform: gpio
+    pin:
+      number: GPIO6
+      mode: INPUT
+      inverted: true  # Active low
+    name: "Zone 3 Valve Open"
+    id: zone3_valve
+    device_class: opening
+    on_state:
+      then:
+        - script.execute: update_pump_state
+
+  - platform: gpio
+    pin:
+      number: GPIO7
+      mode: INPUT
+      inverted: true  # Active low
+    name: "Zone 4 Valve Open"
+    id: zone4_valve
+    device_class: opening
+    on_state:
+      then:
+        - script.execute: update_pump_state
+
+  - platform: gpio
+    pin:
+      number: GPIO8
+      mode: INPUT
+      inverted: true  # Active low
+    name: "Zone 5 Valve Open"
+    id: zone5_valve
+    device_class: opening
+    on_state:
+      then:
+        - script.execute: update_pump_state
+
+  - platform: gpio
+    pin:
+      number: GPIO9
+      mode: INPUT
+      inverted: true  # Active low
+    name: "Zone 6 Valve Open"
+    id: zone6_valve
+    device_class: opening
+    on_state:
+      then:
+        - script.execute: update_pump_state
+
+  - platform: gpio
+    pin:
+      number: GPIO10
+      mode: INPUT
+      inverted: true  # Active low
+    name: "Zone 7 Valve Open"
+    id: zone7_valve
+    device_class: opening
+    on_state:
+      then:
+        - script.execute: update_pump_state
+
+  # Digital Input 8 available for future use (e.g., expansion zone valve feedback)
+  - platform: gpio
+    pin:
+      number: GPIO11
+      mode: INPUT
+      inverted: true  # Active low
+    name: "Digital Input 8"
+    id: di8
+
+  # Virtual sensor showing if any valve is open (for HA dashboard)
+  - platform: template
+    name: "Any Valve Open"
+    id: any_valve_open
+    device_class: opening
+    lambda: |-
+      return id(zone1_valve).state || id(zone2_valve).state || id(zone3_valve).state ||
+             id(zone4_valve).state || id(zone5_valve).state || id(zone6_valve).state ||
+             id(zone7_valve).state;
+
+  # Pump running status (for HA dashboard)
+  - platform: template
+    name: "Circulation Pump Running"
+    id: pump_running
+    device_class: running
+    lambda: |-
+      return id(pump_relay).state;
+
+# Pump control scripts
+script:
+  - id: update_pump_state
+    mode: restart
+    then:
+      - lambda: |-
+          // Check if any valve is open
+          bool any_valve = id(zone1_valve).state || id(zone2_valve).state || id(zone3_valve).state ||
+                           id(zone4_valve).state || id(zone5_valve).state || id(zone6_valve).state ||
+                           id(zone7_valve).state;
+
+          // Check if any zone is calling for heat (pump demand)
+          bool heat_demand = id(pump_demand);
+
+          if (heat_demand && any_valve) {
+            // Demand exists and valve confirmed open - start pump after delay
+            ESP_LOGI("pump", "Heat demand with valve open - starting pump after delay");
+          } else if (!heat_demand) {
+            // No heat demand - stop pump after delay
+            ESP_LOGI("pump", "No heat demand - stopping pump after delay");
+          } else {
+            // Heat demand but no valve open yet - wait
+            ESP_LOGI("pump", "Heat demand but waiting for valve to open");
+          }
+      - if:
+          condition:
+            lambda: |-
+              bool any_valve = id(zone1_valve).state || id(zone2_valve).state || id(zone3_valve).state ||
+                               id(zone4_valve).state || id(zone5_valve).state || id(zone6_valve).state ||
+                               id(zone7_valve).state;
+              return id(pump_demand) && any_valve;
+          then:
+            - delay: !lambda "return id(pump_start_delay).state * 1000;"
+            - switch.turn_on: pump_relay
+            - light.turn_on:
+                id: status_led
+                effect: "Heating Active"
+                red: 100%
+                green: 30%
+                blue: 0%
+          else:
+            - if:
+                condition:
+                  lambda: 'return !id(pump_demand);'
+                then:
+                  - delay: !lambda "return id(pump_stop_delay).state * 1000;"
+                  - switch.turn_off: pump_relay
+                  - light.turn_on:
+                      id: status_led
+                      effect: none
+                      red: 0%
+                      green: 100%
+                      blue: 0%
+
+  - id: set_pump_demand
+    mode: restart
+    then:
+      - lambda: |-
+          // Check if any zone thermostat is actively heating
+          bool demand = false;
+          auto z1_action = id(zone1_climate).action;
+          auto z2_action = id(zone2_climate).action;
+          auto z3_action = id(zone3_climate).action;
+          auto z4_action = id(zone4_climate).action;
+          auto z5_action = id(zone5_climate).action;
+          auto z6_action = id(zone6_climate).action;
+          auto z7_action = id(zone7_climate).action;
+
+          if (z1_action == climate::CLIMATE_ACTION_HEATING ||
+              z2_action == climate::CLIMATE_ACTION_HEATING ||
+              z3_action == climate::CLIMATE_ACTION_HEATING ||
+              z4_action == climate::CLIMATE_ACTION_HEATING ||
+              z5_action == climate::CLIMATE_ACTION_HEATING ||
+              z6_action == climate::CLIMATE_ACTION_HEATING ||
+              z7_action == climate::CLIMATE_ACTION_HEATING) {
+            demand = true;
+          }
+
+          id(pump_demand) = demand;
+          ESP_LOGI("pump", "Pump demand updated: %s", demand ? "true" : "false");
+      - script.execute: update_pump_state
+
+# RGB status LED (WS2812)
+light:
+  - platform: neopixelbus
+    type: GRB
+    variant: WS2812
+    pin: GPIO38
+    num_leds: 1
+    name: "Status LED"
+    id: status_led
+    effects:
+      - pulse:
+          name: "Heating Active"
+          transition_length: 1s
+          update_interval: 1s
+
+# Time sync for logging
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: America/Los_Angeles

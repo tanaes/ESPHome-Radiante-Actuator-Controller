@@ -1,0 +1,45 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "serialPort",
+      "type": "promptString",
+      "description": "Serial port (e.g., /dev/tty.usbserial-XXXX)",
+      "default": "/dev/tty.usbserial-XXXX"
+    }
+  ],
+  "tasks": [
+    {
+      "label": "ESPHome: Compile",
+      "type": "shell",
+      "command": "esphome",
+      "args": ["compile", "esphome/actuator.yaml"],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "ESPHome: Upload (USB)",
+      "type": "shell",
+      "command": "esphome",
+      "args": ["upload", "esphome/actuator.yaml", "--device", "${input:serialPort}"],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "ESPHome: Upload (OTA)",
+      "type": "shell",
+      "command": "esphome",
+      "args": ["upload", "esphome/actuator.yaml"],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "ESPHome: Dashboard",
+      "type": "shell",
+      "command": "esphome",
+      "args": ["dashboard", "esphome"],
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

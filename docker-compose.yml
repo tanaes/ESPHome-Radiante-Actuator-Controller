@@ -1,0 +1,11 @@
+version: "3.8"
+services:
+  esphome:
+    image: ghcr.io/esphome/esphome:latest
+    volumes:
+      - ./:/config
+    ports:
+      - "6052:6052"
+    environment:
+      - ESPHOME_DASHBOARD_USE_PING=true
+    command: dashboard /config/esphome
