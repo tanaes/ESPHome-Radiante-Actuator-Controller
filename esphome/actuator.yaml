@@ -22,6 +22,8 @@ globals:
     restore_value: no
     initial_value: 'false'
 
+# Waveshare ESP32-S3-ETH-8DI-8RO board
+# https://devices.esphome.io/devices/waveshare-esp32-s3-eth-8di-8do/
 esp32:
   board: esp32-s3-devkitc-1
   framework:
@@ -38,7 +40,7 @@ ota:
   - platform: esphome
     password: !secret ota_password
 
-# Ethernet is primary network interface for this board
+# Ethernet is primary network interface (W5500 on Waveshare board)
 ethernet:
   type: W5500
   clk_pin: GPIO15
@@ -46,7 +48,7 @@ ethernet:
   miso_pin: GPIO14
   cs_pin: GPIO16
   interrupt_pin: GPIO12
-  reset_pin: GPIO17
+  reset_pin: GPIO39
 
 # WiFi as fallback (optional - comment out if not needed)
 wifi:
@@ -61,14 +63,16 @@ captive_portal:
 web_server:
   port: 80
 
-# I2C bus for TCA9554 (relay expander) and DS2484 (1-wire master)
+# I2C bus for PCA9554 (relay expander), DS2484 (1-wire master), and PCF85063 (RTC)
+# Waveshare board I2C pins: SDA=GPIO42, SCL=GPIO41
 i2c:
   sda: GPIO42
   scl: GPIO41
   scan: true
   frequency: 100kHz
 
-# TCA9554 I/O expander for relay control (address 0x20)
+# PCA9554 I/O expander for relay control (address 0x20)
+# Waveshare board uses PCA9554; ESPHome's tca9554 component is register-compatible
 tca9554:
   - id: relay_expander
     address: 0x20
@@ -79,7 +83,8 @@ tca9554:
 #   - id: expansion_relays
 #     address: 0x21  # Use different address than TCA9554
 
-# DS2484 1-wire master for temperature sensors
+# DS2484 1-wire master for temperature sensors (Adafruit DS2484 breakout)
+# Default I2C address: 0x18
 one_wire:
   - platform: ds2484
     id: onewire_bus
@@ -578,6 +583,7 @@ climate:
 
 # Valve feedback sensors (active when valve is open)
 # These are used to interlock the circulation pump - pump only runs when at least one valve is confirmed open
+# Waveshare board digital inputs DI1-DI8: GPIO4-GPIO11, active-low with internal pullups
 binary_sensor:
   - platform: status
     name: "Controller Status"
@@ -585,11 +591,13 @@ binary_sensor:
   - platform: gpio
     pin:
       number: GPIO4
-      mode: INPUT
+      mode: INPUT_PULLUP
       inverted: true  # Active low
     name: "Zone 1 Valve Open"
     id: zone1_valve
     device_class: opening
+    filters:
+      - delayed_on_off: 10ms
     on_state:
       then:
         - script.execute: update_pump_state
@@ -597,11 +605,13 @@ binary_sensor:
   - platform: gpio
     pin:
       number: GPIO5
-      mode: INPUT
+      mode: INPUT_PULLUP
       inverted: true  # Active low
     name: "Zone 2 Valve Open"
     id: zone2_valve
     device_class: opening
+    filters:
+      - delayed_on_off: 10ms
     on_state:
       then:
         - script.execute: update_pump_state
@@ -609,11 +619,13 @@ binary_sensor:
   - platform: gpio
     pin:
       number: GPIO6
-      mode: INPUT
+      mode: INPUT_PULLUP
       inverted: true  # Active low
     name: "Zone 3 Valve Open"
     id: zone3_valve
     device_class: opening
+    filters:
+      - delayed_on_off: 10ms
     on_state:
       then:
         - script.execute: update_pump_state
@@ -621,11 +633,13 @@ binary_sensor:
   - platform: gpio
     pin:
       number: GPIO7
-      mode: INPUT
+      mode: INPUT_PULLUP
       inverted: true  # Active low
     name: "Zone 4 Valve Open"
     id: zone4_valve
     device_class: opening
+    filters:
+      - delayed_on_off: 10ms
     on_state:
       then:
         - script.execute: update_pump_state
@@ -633,11 +647,13 @@ binary_sensor:
   - platform: gpio
     pin:
       number: GPIO8
-      mode: INPUT
+      mode: INPUT_PULLUP
       inverted: true  # Active low
     name: "Zone 5 Valve Open"
     id: zone5_valve
     device_class: opening
+    filters:
+      - delayed_on_off: 10ms
     on_state:
       then:
         - script.execute: update_pump_state
@@ -645,11 +661,13 @@ binary_sensor:
   - platform: gpio
     pin:
       number: GPIO9
-      mode: INPUT
+      mode: INPUT_PULLUP
       inverted: true  # Active low
     name: "Zone 6 Valve Open"
     id: zone6_valve
     device_class: opening
+    filters:
+      - delayed_on_off: 10ms
     on_state:
       then:
         - script.execute: update_pump_state
@@ -657,23 +675,27 @@ binary_sensor:
   - platform: gpio
     pin:
       number: GPIO10
-      mode: INPUT
+      mode: INPUT_PULLUP
       inverted: true  # Active low
     name: "Zone 7 Valve Open"
     id: zone7_valve
     device_class: opening
+    filters:
+      - delayed_on_off: 10ms
     on_state:
       then:
         - script.execute: update_pump_state
 
-  # Digital Input 8 available for future use (e.g., expansion zone valve feedback)
+  # Digital Input 8 (DI8) available for future use (e.g., expansion zone valve feedback)
   - platform: gpio
     pin:
       number: GPIO11
-      mode: INPUT
+      mode: INPUT_PULLUP
       inverted: true  # Active low
     name: "Digital Input 8"
     id: di8
+    filters:
+      - delayed_on_off: 10ms
 
   # Virtual sensor showing if any valve is open (for HA dashboard)
   - platform: template
