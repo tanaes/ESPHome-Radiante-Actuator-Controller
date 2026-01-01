@@ -14,7 +14,7 @@ ESP32-S3 firmware for a 7-zone radiant floor heating controller using ESPHome. T
 - 8 digital inputs (DI1-DI8) with opto-isolation
 - 8 relay outputs (DO1-DO8) via PCA9554 I2C expander
 - W5500 Ethernet + WiFi connectivity
-- Built-in RS485 and CANbus interfaces (unused)
+- Built-in RS485 and CANbus interfaces (repurposed for display SPI)
 - PCF85063 RTC (unused)
 
 **External Components:**
@@ -48,7 +48,7 @@ ESP32-S3 firmware for a 7-zone radiant floor heating controller using ESPHome. T
 | MOSI | GPIO47 | SD Card header |
 | CS | GPIO45 | SD Card header |
 | DC | GPIO21 | |
-| RST | - | RC circuit (10kΩ + 1µF) |
+| RST | GPIO1 | Or tie to 3.3V |
 | **Other** | | |
 | RGB LED | GPIO38 | WS2812 |
 | Buzzer | GPIO46 | Available, unused |
