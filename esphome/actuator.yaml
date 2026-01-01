@@ -881,8 +881,8 @@ display:
     cs_pin: GPIO45    # SD Card MISO (repurposed, display is write-only)
     dc_pin: GPIO21
     reset_pin: GPIO1
-    dimensions: [320, 240]
-    rotation: 0
+    dimensions: [240, 320]
+    rotation: 270
     invert_colors: false
     update_interval: 1s
     lambda: |-
