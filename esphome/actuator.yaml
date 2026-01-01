@@ -89,25 +89,25 @@ one_wire:
   - platform: ds2484
     id: onewire_bus
 
-# Global setpoint that can be applied to all zones
+# Global setpoint that can be applied to all zones (in Celsius)
 number:
   - platform: template
     name: "Global Setpoint"
     id: global_setpoint
-    unit_of_measurement: "°F"
+    unit_of_measurement: "°C"
     device_class: temperature
     optimistic: true
-    min_value: 50
-    max_value: 85
+    min_value: 10
+    max_value: 30
     step: 0.5
-    initial_value: 68
+    initial_value: 20
     restore_value: true
     on_value:
       then:
         - lambda: |-
             // Only apply to zones that haven't been individually overridden
             // Users can set per-zone temps via HA which won't be overwritten
-            ESP_LOGI("thermostat", "Global setpoint changed to %.1f°F", x);
+            ESP_LOGI("thermostat", "Global setpoint changed to %.1f°C", x);
 
   - platform: template
     name: "Apply Global Setpoint"
@@ -133,7 +133,7 @@ number:
                   id(zone5_climate).target_temperature = setpoint;
                   id(zone6_climate).target_temperature = setpoint;
                   id(zone7_climate).target_temperature = setpoint;
-                  ESP_LOGI("thermostat", "Applied global setpoint %.1f°F to all zones", setpoint);
+                  ESP_LOGI("thermostat", "Applied global setpoint %.1f°C to all zones", setpoint);
               - number.set:
                   id: apply_global_trigger
                   value: 0
@@ -164,12 +164,12 @@ number:
   - platform: template
     name: "Thermostat Hysteresis"
     id: hysteresis
-    unit_of_measurement: "°F"
+    unit_of_measurement: "°C"
     optimistic: true
     min_value: 0.5
-    max_value: 5
+    max_value: 3
     step: 0.5
-    initial_value: 1.0
+    initial_value: 0.5
     restore_value: true
 
 # Internal relay switches via TCA9554 expander
@@ -283,12 +283,10 @@ switch:
 sensor:
   - platform: dallas_temp
     one_wire_id: onewire_bus
-    address: 0x0000000000000001  # Replace with actual address
+    index: 0  # First discovered sensor - check logs for actual address
     name: "Zone 1 Temperature"
     id: zone1_temp
-    unit_of_measurement: "°F"
-    filters:
-      - lambda: return x * 9.0/5.0 + 32.0;  # Convert C to F
+    unit_of_measurement: "°C"  # Convert C to F
     on_value:
       then:
         - lambda: |-
@@ -296,12 +294,10 @@ sensor:
 
   - platform: dallas_temp
     one_wire_id: onewire_bus
-    address: 0x0000000000000002  # Replace with actual address
+    index: 1  # Second discovered sensor - check logs for actual address
     name: "Zone 2 Temperature"
     id: zone2_temp
-    unit_of_measurement: "°F"
-    filters:
-      - lambda: return x * 9.0/5.0 + 32.0;
+    unit_of_measurement: "°C"
     on_value:
       then:
         - lambda: |-
@@ -312,9 +308,7 @@ sensor:
     address: 0x0000000000000003  # Replace with actual address
     name: "Zone 3 Temperature"
     id: zone3_temp
-    unit_of_measurement: "°F"
-    filters:
-      - lambda: return x * 9.0/5.0 + 32.0;
+    unit_of_measurement: "°C"
     on_value:
       then:
         - lambda: |-
@@ -325,9 +319,7 @@ sensor:
     address: 0x0000000000000004  # Replace with actual address
     name: "Zone 4 Temperature"
     id: zone4_temp
-    unit_of_measurement: "°F"
-    filters:
-      - lambda: return x * 9.0/5.0 + 32.0;
+    unit_of_measurement: "°C"
     on_value:
       then:
         - lambda: |-
@@ -338,9 +330,7 @@ sensor:
     address: 0x0000000000000005  # Replace with actual address
     name: "Zone 5 Temperature"
     id: zone5_temp
-    unit_of_measurement: "°F"
-    filters:
-      - lambda: return x * 9.0/5.0 + 32.0;
+    unit_of_measurement: "°C"
     on_value:
       then:
         - lambda: |-
@@ -351,9 +341,7 @@ sensor:
     address: 0x0000000000000006  # Replace with actual address
     name: "Zone 6 Temperature"
     id: zone6_temp
-    unit_of_measurement: "°F"
-    filters:
-      - lambda: return x * 9.0/5.0 + 32.0;
+    unit_of_measurement: "°C"
     on_value:
       then:
         - lambda: |-
@@ -364,9 +352,7 @@ sensor:
     address: 0x0000000000000007  # Replace with actual address
     name: "Zone 7 Temperature"
     id: zone7_temp
-    unit_of_measurement: "°F"
-    filters:
-      - lambda: return x * 9.0/5.0 + 32.0;
+    unit_of_measurement: "°C"
     on_value:
       then:
         - lambda: |-
@@ -396,12 +382,12 @@ climate:
     default_preset: Home
     preset:
       - name: Home
-        default_target_temperature_low: 68 °F
+        default_target_temperature_low: 20  # 68°F in Celsius
     min_heating_off_time: 60s
     min_heating_run_time: 60s
     min_idle_time: 30s
-    heat_deadband: 1 °F
-    heat_overrun: 0 °F
+    heat_deadband: 0.5  # ~1°F in Celsius
+    heat_overrun: 0
     heat_action:
       - switch.turn_on: zone1_relay
       - script.execute: set_pump_demand
@@ -409,9 +395,9 @@ climate:
       - switch.turn_off: zone1_relay
       - script.execute: set_pump_demand
     visual:
-      min_temperature: 50 °F
-      max_temperature: 85 °F
-      temperature_step: 0.5 °F
+      min_temperature: 10  # 50°F
+      max_temperature: 30  # 86°F
+      temperature_step: 0.5
 
   - platform: thermostat
     name: "Zone 2 Thermostat"
@@ -420,12 +406,12 @@ climate:
     default_preset: Home
     preset:
       - name: Home
-        default_target_temperature_low: 68 °F
+        default_target_temperature_low: 20  # 68°F
     min_heating_off_time: 60s
     min_heating_run_time: 60s
     min_idle_time: 30s
-    heat_deadband: 1 °F
-    heat_overrun: 0 °F
+    heat_deadband: 0.5  # ~1°F
+    heat_overrun: 0
     heat_action:
       - switch.turn_on: zone2_relay
       - script.execute: set_pump_demand
@@ -433,9 +419,9 @@ climate:
       - switch.turn_off: zone2_relay
       - script.execute: set_pump_demand
     visual:
-      min_temperature: 50 °F
-      max_temperature: 85 °F
-      temperature_step: 0.5 °F
+      min_temperature: 10  # 50°F
+      max_temperature: 30  # 86°F
+      temperature_step: 0.5
 
   - platform: thermostat
     name: "Zone 3 Thermostat"
@@ -444,12 +430,12 @@ climate:
     default_preset: Home
     preset:
       - name: Home
-        default_target_temperature_low: 68 °F
+        default_target_temperature_low: 20  # 68°F
     min_heating_off_time: 60s
     min_heating_run_time: 60s
     min_idle_time: 30s
-    heat_deadband: 1 °F
-    heat_overrun: 0 °F
+    heat_deadband: 0.5  # ~1°F
+    heat_overrun: 0
     heat_action:
       - switch.turn_on: zone3_relay
       - script.execute: set_pump_demand
@@ -457,9 +443,9 @@ climate:
       - switch.turn_off: zone3_relay
       - script.execute: set_pump_demand
     visual:
-      min_temperature: 50 °F
-      max_temperature: 85 °F
-      temperature_step: 0.5 °F
+      min_temperature: 10  # 50°F
+      max_temperature: 30  # 86°F
+      temperature_step: 0.5
 
   - platform: thermostat
     name: "Zone 4 Thermostat"
@@ -468,12 +454,12 @@ climate:
     default_preset: Home
     preset:
       - name: Home
-        default_target_temperature_low: 68 °F
+        default_target_temperature_low: 20  # 68°F
     min_heating_off_time: 60s
     min_heating_run_time: 60s
     min_idle_time: 30s
-    heat_deadband: 1 °F
-    heat_overrun: 0 °F
+    heat_deadband: 0.5  # ~1°F
+    heat_overrun: 0
     heat_action:
       - switch.turn_on: zone4_relay
       - script.execute: set_pump_demand
@@ -481,9 +467,9 @@ climate:
       - switch.turn_off: zone4_relay
       - script.execute: set_pump_demand
     visual:
-      min_temperature: 50 °F
-      max_temperature: 85 °F
-      temperature_step: 0.5 °F
+      min_temperature: 10  # 50°F
+      max_temperature: 30  # 86°F
+      temperature_step: 0.5
 
   - platform: thermostat
     name: "Zone 5 Thermostat"
@@ -492,12 +478,12 @@ climate:
     default_preset: Home
     preset:
       - name: Home
-        default_target_temperature_low: 68 °F
+        default_target_temperature_low: 20  # 68°F
     min_heating_off_time: 60s
     min_heating_run_time: 60s
     min_idle_time: 30s
-    heat_deadband: 1 °F
-    heat_overrun: 0 °F
+    heat_deadband: 0.5  # ~1°F
+    heat_overrun: 0
     heat_action:
       - switch.turn_on: zone5_relay
       - script.execute: set_pump_demand
@@ -505,9 +491,9 @@ climate:
       - switch.turn_off: zone5_relay
       - script.execute: set_pump_demand
     visual:
-      min_temperature: 50 °F
-      max_temperature: 85 °F
-      temperature_step: 0.5 °F
+      min_temperature: 10  # 50°F
+      max_temperature: 30  # 86°F
+      temperature_step: 0.5
 
   - platform: thermostat
     name: "Zone 6 Thermostat"
@@ -516,12 +502,12 @@ climate:
     default_preset: Home
     preset:
       - name: Home
-        default_target_temperature_low: 68 °F
+        default_target_temperature_low: 20  # 68°F
     min_heating_off_time: 60s
     min_heating_run_time: 60s
     min_idle_time: 30s
-    heat_deadband: 1 °F
-    heat_overrun: 0 °F
+    heat_deadband: 0.5  # ~1°F
+    heat_overrun: 0
     heat_action:
       - switch.turn_on: zone6_relay
       - script.execute: set_pump_demand
@@ -529,9 +515,9 @@ climate:
       - switch.turn_off: zone6_relay
       - script.execute: set_pump_demand
     visual:
-      min_temperature: 50 °F
-      max_temperature: 85 °F
-      temperature_step: 0.5 °F
+      min_temperature: 10  # 50°F
+      max_temperature: 30  # 86°F
+      temperature_step: 0.5
 
   - platform: thermostat
     name: "Zone 7 Thermostat"
@@ -540,12 +526,12 @@ climate:
     default_preset: Home
     preset:
       - name: Home
-        default_target_temperature_low: 68 °F
+        default_target_temperature_low: 20  # 68°F
     min_heating_off_time: 60s
     min_heating_run_time: 60s
     min_idle_time: 30s
-    heat_deadband: 1 °F
-    heat_overrun: 0 °F
+    heat_deadband: 0.5  # ~1°F
+    heat_overrun: 0
     heat_action:
       - switch.turn_on: zone7_relay
       - script.execute: set_pump_demand
@@ -553,9 +539,9 @@ climate:
       - switch.turn_off: zone7_relay
       - script.execute: set_pump_demand
     visual:
-      min_temperature: 50 °F
-      max_temperature: 85 °F
-      temperature_step: 0.5 °F
+      min_temperature: 10  # 50°F
+      max_temperature: 30  # 86°F
+      temperature_step: 0.5
 
 # Zone 8 thermostat available for expansion via XL9535
 # Uncomment when expansion board is installed
@@ -800,7 +786,7 @@ script:
 # RGB status LED (WS2812)
 light:
   - platform: esp32_rmt_led_strip
-    rgb_order: GRB
+    rgb_order: RGB
     chipset: WS2812
     pin: GPIO38
     num_leds: 1
@@ -811,12 +797,62 @@ light:
           name: "Heating Active"
           transition_length: 1s
           update_interval: 1s
+      - strobe:
+          name: "Fast Blink"
+          colors:
+            - state: true
+              duration: 200ms
+            - state: false
+              duration: 200ms
 
 # Time sync for logging
 time:
   - platform: sntp
     id: sntp_time
     timezone: America/Los_Angeles
+
+# Periodic status logging and LED updates
+interval:
+  - interval: 10s
+    then:
+      - lambda: |-
+          // Log network status and IP address
+          if (wifi::global_wifi_component->is_connected()) {
+            auto ips = wifi::global_wifi_component->get_ip_addresses();
+            if (!ips.empty()) {
+              ESP_LOGI("status", "WiFi connected - IP: %s, RSSI: %d dBm",
+                       ips[0].str().c_str(),
+                       wifi::global_wifi_component->wifi_rssi());
+            }
+          } else {
+            ESP_LOGW("status", "WiFi disconnected - attempting to connect...");
+          }
+
+          // Log sensor status
+          ESP_LOGI("status", "Zone1: %.1f°C, Zone2: %.1f°C",
+                   id(zone1_temp).state, id(zone2_temp).state);
+
+          // Update LED based on status
+          if (!wifi::global_wifi_component->is_connected()) {
+            // Red blink = no WiFi
+            auto call = id(status_led).turn_on();
+            call.set_rgb(1.0, 0.0, 0.0);
+            call.set_effect("Fast Blink");
+            call.perform();
+          } else if (id(pump_demand)) {
+            // Orange pulse = heating active
+            auto call = id(status_led).turn_on();
+            call.set_rgb(1.0, 0.3, 0.0);
+            call.set_effect("Heating Active");
+            call.perform();
+          } else {
+            // Green = connected and idle
+            auto call = id(status_led).turn_on();
+            call.set_rgb(0.0, 1.0, 0.0);
+            call.set_brightness(0.3);
+            call.set_effect("none");
+            call.perform();
+          }
 
 # SPI bus for TFT display (using SD Card header pins)
 # SD Card header: SCLK=GPIO48, MOSI=GPIO47, MISO=GPIO45 (repurposed as CS)
@@ -997,4 +1033,4 @@ display:
       }
 
       // Global setpoint
-      it.printf(200, time_y, id(font_medium), WHITE, "Set: %.0f°F", id(global_setpoint).state);
+      it.printf(200, time_y, id(font_medium), WHITE, "Set: %.0f°C", id(global_setpoint).state);
