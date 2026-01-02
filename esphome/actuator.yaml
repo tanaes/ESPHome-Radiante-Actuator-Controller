@@ -22,12 +22,71 @@ globals:
     restore_value: no
     initial_value: 'false'
 
+  # Temperature history for graphs (40 samples = 20 min at 30s interval)
+  - id: temp_history_1
+    type: float[40]
+    restore_value: no
+  - id: temp_history_2
+    type: float[40]
+    restore_value: no
+  - id: temp_history_3
+    type: float[40]
+    restore_value: no
+  - id: temp_history_4
+    type: float[40]
+    restore_value: no
+  - id: temp_history_5
+    type: float[40]
+    restore_value: no
+  - id: temp_history_6
+    type: float[40]
+    restore_value: no
+  - id: temp_history_7
+    type: float[40]
+    restore_value: no
+
+  # Pump status history for binary graph
+  - id: pump_history
+    type: bool[40]
+    restore_value: no
+
+  # History write index
+  - id: history_index
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  # Failsafe: per-zone error scores (0-100, triggers safety error at threshold)
+  - id: zone_error_scores
+    type: int[7]
+    restore_value: no
+
+  # Failsafe: reference temperature when heating started (for tracking rise)
+  - id: zone_heat_ref_temps
+    type: float[7]
+    restore_value: no
+
+  # Failsafe: heating duration counter (increments every 30s while heating)
+  - id: zone_heat_duration
+    type: int[7]
+    restore_value: no
+
+  # Failsafe: valve timeout counter (increments while relay on but valve not open)
+  - id: zone_valve_timeout
+    type: int[7]
+    restore_value: no
+
 # Waveshare ESP32-S3-ETH-8DI-8RO board
 # https://devices.esphome.io/devices/waveshare-esp32-s3-eth-8di-8do/
 esp32:
   board: esp32-s3-devkitc-1
   framework:
     type: esp-idf
+
+# Enable PSRAM (8MB available on ESP32-S3-WROOM-1U-N16R8)
+psram:
+  mode: octal
+  speed: 80MHz
 
 logger:
   level: INFO
@@ -101,7 +160,7 @@ number:
     max_value: 30
     step: 0.5
     initial_value: 20
-    restore_value: true
+    restore_value: false  # Disabled to reset from old °F values - can re-enable later
     on_value:
       then:
         - lambda: |-
@@ -170,9 +229,9 @@ number:
     max_value: 3
     step: 0.5
     initial_value: 0.5
-    restore_value: true
+    restore_value: false  # Disabled to reset from old °F values
 
-# Internal relay switches via TCA9554 expander
+# Internal relay switches via PCA9554 expander
 switch:
   - platform: gpio
     name: "Zone 1 Relay"
@@ -286,7 +345,7 @@ sensor:
     index: 0  # First discovered sensor - check logs for actual address
     name: "Zone 1 Temperature"
     id: zone1_temp
-    unit_of_measurement: "°C"  # Convert C to F
+    unit_of_measurement: "°C"
     on_value:
       then:
         - lambda: |-
@@ -372,6 +431,91 @@ sensor:
 #       then:
 #         - lambda: |-
 #             id(zone8_climate).current_temperature = x;
+
+  # Failsafe error score sensors (0-100, safety error at 50+)
+  - platform: template
+    name: "Zone 1 Error Score"
+    id: zone1_error_score
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    lambda: 'return id(zone_error_scores)[0];'
+    update_interval: 30s
+
+  - platform: template
+    name: "Zone 2 Error Score"
+    id: zone2_error_score
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    lambda: 'return id(zone_error_scores)[1];'
+    update_interval: 30s
+
+  - platform: template
+    name: "Zone 3 Error Score"
+    id: zone3_error_score
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    lambda: 'return id(zone_error_scores)[2];'
+    update_interval: 30s
+
+  - platform: template
+    name: "Zone 4 Error Score"
+    id: zone4_error_score
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    lambda: 'return id(zone_error_scores)[3];'
+    update_interval: 30s
+
+  - platform: template
+    name: "Zone 5 Error Score"
+    id: zone5_error_score
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    lambda: 'return id(zone_error_scores)[4];'
+    update_interval: 30s
+
+  - platform: template
+    name: "Zone 6 Error Score"
+    id: zone6_error_score
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    lambda: 'return id(zone_error_scores)[5];'
+    update_interval: 30s
+
+  - platform: template
+    name: "Zone 7 Error Score"
+    id: zone7_error_score
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    lambda: 'return id(zone_error_scores)[6];'
+    update_interval: 30s
+
+  # Memory monitoring sensors
+  - platform: template
+    name: "Free Heap Memory"
+    id: free_heap
+    unit_of_measurement: "KB"
+    accuracy_decimals: 1
+    lambda: 'return heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024.0;'
+    update_interval: 60s
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Free PSRAM"
+    id: free_psram
+    unit_of_measurement: "KB"
+    accuracy_decimals: 1
+    lambda: 'return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024.0;'
+    update_interval: 60s
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Minimum Free Heap"
+    id: min_free_heap
+    unit_of_measurement: "KB"
+    accuracy_decimals: 1
+    lambda: 'return heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024.0;'
+    update_interval: 60s
+    entity_category: diagnostic
 
 # Thermostat climate entities for each zone
 climate:
@@ -854,6 +998,134 @@ interval:
             call.perform();
           }
 
+  # Sample temperature history and run failsafe checks (every 30 seconds)
+  - interval: 30s
+    then:
+      - lambda: |-
+          int idx = id(history_index);
+
+          // Sample zone temperatures
+          id(temp_history_1)[idx] = id(zone1_temp).state;
+          id(temp_history_2)[idx] = id(zone2_temp).state;
+          id(temp_history_3)[idx] = id(zone3_temp).state;
+          id(temp_history_4)[idx] = id(zone4_temp).state;
+          id(temp_history_5)[idx] = id(zone5_temp).state;
+          id(temp_history_6)[idx] = id(zone6_temp).state;
+          id(temp_history_7)[idx] = id(zone7_temp).state;
+
+          // Sample pump status
+          id(pump_history)[idx] = id(pump_relay).state;
+
+          // Advance circular buffer index
+          id(history_index) = (idx + 1) % 40;
+
+          // === FAILSAFE MONITORING ===
+          // Arrays for zone data access
+          float temps[7] = {
+            id(zone1_temp).state, id(zone2_temp).state, id(zone3_temp).state,
+            id(zone4_temp).state, id(zone5_temp).state, id(zone6_temp).state,
+            id(zone7_temp).state
+          };
+          bool relays[7] = {
+            id(zone1_relay).state, id(zone2_relay).state, id(zone3_relay).state,
+            id(zone4_relay).state, id(zone5_relay).state, id(zone6_relay).state,
+            id(zone7_relay).state
+          };
+          bool valves[7] = {
+            id(zone1_valve).state, id(zone2_valve).state, id(zone3_valve).state,
+            id(zone4_valve).state, id(zone5_valve).state, id(zone6_valve).state,
+            id(zone7_valve).state
+          };
+          bool heating[7] = {
+            id(zone1_climate).action == climate::CLIMATE_ACTION_HEATING,
+            id(zone2_climate).action == climate::CLIMATE_ACTION_HEATING,
+            id(zone3_climate).action == climate::CLIMATE_ACTION_HEATING,
+            id(zone4_climate).action == climate::CLIMATE_ACTION_HEATING,
+            id(zone5_climate).action == climate::CLIMATE_ACTION_HEATING,
+            id(zone6_climate).action == climate::CLIMATE_ACTION_HEATING,
+            id(zone7_climate).action == climate::CLIMATE_ACTION_HEATING
+          };
+
+          // Thresholds
+          const int VALVE_TIMEOUT_THRESHOLD = 20;     // 20 * 30s = 10 minutes
+          const int HEAT_CHECK_DELAY = 10;            // Wait 10 * 30s = 5 min before checking temp rise
+          const float MIN_TEMP_RISE = 0.2;            // Expect at least 0.2°C rise
+          const int ERROR_THRESHOLD = 50;             // Error score threshold for safety flag
+          const int ERROR_INCREMENT = 5;              // Points added per failure
+          const int ERROR_DECREMENT = 1;              // Points removed when OK
+
+          for (int i = 0; i < 7; i++) {
+            float temp = temps[i];
+            bool relay_on = relays[i];
+            bool valve_open = valves[i];
+            bool is_heating = heating[i];
+            bool sensor_valid = !std::isnan(temp) && temp > 0 && temp < 80;
+
+            // --- Valve timeout check ---
+            if (relay_on && !valve_open) {
+              // Relay commanded but valve not confirmed open
+              id(zone_valve_timeout)[i]++;
+              if (id(zone_valve_timeout)[i] > VALVE_TIMEOUT_THRESHOLD) {
+                id(zone_error_scores)[i] += ERROR_INCREMENT;
+                ESP_LOGW("failsafe", "Zone %d: Valve timeout (relay on, no valve feedback)", i + 1);
+              }
+            } else {
+              id(zone_valve_timeout)[i] = 0;  // Reset timeout counter
+            }
+
+            // --- Temperature rise check ---
+            if (is_heating && valve_open && sensor_valid) {
+              // Zone is actively heating with valve confirmed
+              if (id(zone_heat_duration)[i] == 0) {
+                // Just started heating - record reference temperature
+                id(zone_heat_ref_temps)[i] = temp;
+              }
+              id(zone_heat_duration)[i]++;
+
+              // After delay, check if temperature is rising
+              if (id(zone_heat_duration)[i] > HEAT_CHECK_DELAY) {
+                float ref_temp = id(zone_heat_ref_temps)[i];
+                float temp_change = temp - ref_temp;
+
+                if (temp_change < MIN_TEMP_RISE) {
+                  // Temperature not rising as expected
+                  id(zone_error_scores)[i] += ERROR_INCREMENT;
+                  ESP_LOGW("failsafe", "Zone %d: No temp rise (ref=%.1f, now=%.1f, change=%.2f)",
+                           i + 1, ref_temp, temp, temp_change);
+
+                  // Reset reference to current temp for next check cycle
+                  id(zone_heat_ref_temps)[i] = temp;
+                  id(zone_heat_duration)[i] = HEAT_CHECK_DELAY;  // Keep checking
+                } else {
+                  // Temperature rising normally - decrease error score
+                  if (id(zone_error_scores)[i] > 0) {
+                    id(zone_error_scores)[i] -= ERROR_DECREMENT;
+                  }
+                  // Update reference for continued monitoring
+                  id(zone_heat_ref_temps)[i] = temp;
+                  id(zone_heat_duration)[i] = HEAT_CHECK_DELAY;
+                }
+              }
+            } else {
+              // Not heating - reset duration counter
+              id(zone_heat_duration)[i] = 0;
+
+              // Slowly decay error score when not heating
+              if (id(zone_error_scores)[i] > 0 && !is_heating) {
+                id(zone_error_scores)[i] -= ERROR_DECREMENT;
+              }
+            }
+
+            // Clamp error score to valid range
+            if (id(zone_error_scores)[i] < 0) id(zone_error_scores)[i] = 0;
+            if (id(zone_error_scores)[i] > 100) id(zone_error_scores)[i] = 100;
+
+            // Log if zone has safety error
+            if (id(zone_error_scores)[i] >= ERROR_THRESHOLD) {
+              ESP_LOGE("failsafe", "Zone %d: SAFETY ERROR (score=%d)", i + 1, id(zone_error_scores)[i]);
+            }
+          }
+
 # SPI bus for TFT display (using SD Card header pins)
 # SD Card header: SCLK=GPIO48, MOSI=GPIO47, MISO=GPIO45 (repurposed as CS)
 spi:
@@ -864,6 +1136,9 @@ spi:
 # Fonts for display
 font:
   - file: "gfonts://Roboto"
+    id: font_xlarge
+    size: 20
+  - file: "gfonts://Roboto"
     id: font_large
     size: 16
   - file: "gfonts://Roboto"
@@ -872,6 +1147,9 @@ font:
   - file: "gfonts://Roboto"
     id: font_small
     size: 10
+  - file: "gfonts://Roboto"
+    id: font_tiny
+    size: 8
 
 # 2.2" ILI9341 TFT Display (320x240)
 display:
@@ -891,146 +1169,272 @@ display:
       auto BLACK = Color(0, 0, 0);
       auto RED = Color(255, 0, 0);
       auto GREEN = Color(0, 255, 0);
+      auto BLUE = Color(0, 120, 255);
       auto ORANGE = Color(255, 165, 0);
       auto GRAY = Color(128, 128, 128);
-      auto DARK_GRAY = Color(64, 64, 64);
+      auto DARK_GRAY = Color(48, 48, 48);
+      auto LIGHT_GRAY = Color(80, 80, 80);
 
       // Clear screen
       it.fill(BLACK);
 
-      // Zone box dimensions: 8 boxes across top (7 zones + pump)
+      // Layout constants
       int box_width = 40;
-      int box_height = 80;
-      int box_spacing = 0;
+      int box_height = 78;  // Taller boxes for better readability
+      int graph_height = 84;  // Double height for better visibility
+      int graph_y = box_height;
+      int status_y = box_height + graph_height + 4;
+      float graph_range = 6.0;  // ±6°C range (12°C total)
 
-      // Draw zone boxes
+      // Get global setpoint and hysteresis
+      float global_sp = id(global_setpoint).state;
+      float hyst = id(hysteresis).state;
+      int hist_idx = id(history_index);
+
+      // Helper arrays for zone data access
+      float temps[7] = {
+        id(zone1_temp).state, id(zone2_temp).state, id(zone3_temp).state,
+        id(zone4_temp).state, id(zone5_temp).state, id(zone6_temp).state,
+        id(zone7_temp).state
+      };
+      // Per-zone setpoints from thermostats
+      float setpoints[7] = {
+        id(zone1_climate).target_temperature, id(zone2_climate).target_temperature,
+        id(zone3_climate).target_temperature, id(zone4_climate).target_temperature,
+        id(zone5_climate).target_temperature, id(zone6_climate).target_temperature,
+        id(zone7_climate).target_temperature
+      };
+      bool relays[7] = {
+        id(zone1_relay).state, id(zone2_relay).state, id(zone3_relay).state,
+        id(zone4_relay).state, id(zone5_relay).state, id(zone6_relay).state,
+        id(zone7_relay).state
+      };
+      bool valves[7] = {
+        id(zone1_valve).state, id(zone2_valve).state, id(zone3_valve).state,
+        id(zone4_valve).state, id(zone5_valve).state, id(zone6_valve).state,
+        id(zone7_valve).state
+      };
+      bool heating[7] = {
+        id(zone1_climate).action == climate::CLIMATE_ACTION_HEATING,
+        id(zone2_climate).action == climate::CLIMATE_ACTION_HEATING,
+        id(zone3_climate).action == climate::CLIMATE_ACTION_HEATING,
+        id(zone4_climate).action == climate::CLIMATE_ACTION_HEATING,
+        id(zone5_climate).action == climate::CLIMATE_ACTION_HEATING,
+        id(zone6_climate).action == climate::CLIMATE_ACTION_HEATING,
+        id(zone7_climate).action == climate::CLIMATE_ACTION_HEATING
+      };
+      float* histories[7] = {
+        id(temp_history_1), id(temp_history_2), id(temp_history_3),
+        id(temp_history_4), id(temp_history_5), id(temp_history_6),
+        id(temp_history_7)
+      };
+
+      // Draw zone boxes (7 zones)
       for (int i = 0; i < 7; i++) {
         int x = i * box_width;
+        float temp = temps[i];
+        bool relay_on = relays[i];
+        bool valve_open = valves[i];
+        bool is_heating = heating[i];
 
-        // Get zone data
-        float temp = 0;
-        bool relay_on = false;
-        bool valve_open = false;
-        bool heating = false;
+        // Determine sensor status
+        bool sensor_missing = std::isnan(temp);
+        bool sensor_error = (!sensor_missing && (temp >= 84.5 && temp <= 85.5));  // 85°C = power-on reset
+        bool safety_error = (id(zone_error_scores)[i] >= 50);  // Error score threshold
 
-        switch (i) {
-          case 0:
-            temp = id(zone1_temp).state;
-            relay_on = id(zone1_relay).state;
-            valve_open = id(zone1_valve).state;
-            heating = id(zone1_climate).action == climate::CLIMATE_ACTION_HEATING;
-            break;
-          case 1:
-            temp = id(zone2_temp).state;
-            relay_on = id(zone2_relay).state;
-            valve_open = id(zone2_valve).state;
-            heating = id(zone2_climate).action == climate::CLIMATE_ACTION_HEATING;
-            break;
-          case 2:
-            temp = id(zone3_temp).state;
-            relay_on = id(zone3_relay).state;
-            valve_open = id(zone3_valve).state;
-            heating = id(zone3_climate).action == climate::CLIMATE_ACTION_HEATING;
-            break;
-          case 3:
-            temp = id(zone4_temp).state;
-            relay_on = id(zone4_relay).state;
-            valve_open = id(zone4_valve).state;
-            heating = id(zone4_climate).action == climate::CLIMATE_ACTION_HEATING;
-            break;
-          case 4:
-            temp = id(zone5_temp).state;
-            relay_on = id(zone5_relay).state;
-            valve_open = id(zone5_valve).state;
-            heating = id(zone5_climate).action == climate::CLIMATE_ACTION_HEATING;
-            break;
-          case 5:
-            temp = id(zone6_temp).state;
-            relay_on = id(zone6_relay).state;
-            valve_open = id(zone6_valve).state;
-            heating = id(zone6_climate).action == climate::CLIMATE_ACTION_HEATING;
-            break;
-          case 6:
-            temp = id(zone7_temp).state;
-            relay_on = id(zone7_relay).state;
-            valve_open = id(zone7_valve).state;
-            heating = id(zone7_climate).action == climate::CLIMATE_ACTION_HEATING;
-            break;
+        // Determine colors based on status
+        Color outline_color = WHITE;
+        Color text_color = WHITE;
+        Color bg_color = DARK_GRAY;
+
+        if (sensor_missing) {
+          outline_color = GRAY;
+          text_color = GRAY;
+        } else if (sensor_error) {
+          outline_color = RED;
+        } else if (safety_error) {
+          bg_color = RED;
+        } else if (is_heating) {
+          bg_color = ORANGE;
         }
 
-        // Box background color based on heating state
-        Color bg_color = heating ? ORANGE : DARK_GRAY;
+        // Draw box background and outline
         it.filled_rectangle(x, 0, box_width - 1, box_height, bg_color);
-        it.rectangle(x, 0, box_width - 1, box_height, WHITE);
+        it.rectangle(x, 0, box_width - 1, box_height, outline_color);
 
-        // Zone number
-        it.printf(x + 2, 2, id(font_medium), WHITE, "Z%d", i + 1);
+        // Zone number (top left, tiny)
+        it.printf(x + 2, 1, id(font_tiny), text_color, "Z%d", i + 1);
 
-        // Temperature
-        if (!std::isnan(temp)) {
-          it.printf(x + 2, 18, id(font_large), WHITE, "%.0f", temp);
+        // Temperature (large, centered)
+        if (!sensor_missing) {
+          it.printf(x + 3, 10, id(font_xlarge), text_color, "%.0f", temp);
         } else {
-          it.print(x + 2, 18, id(font_medium), GRAY, "--");
+          it.print(x + 8, 14, id(font_large), GRAY, "--");
         }
 
-        // Relay status (R: commanded)
-        it.printf(x + 2, 40, id(font_small), relay_on ? GREEN : GRAY, "R:%s", relay_on ? "ON" : "off");
+        // Setpoint (below temp) - use zone-specific setpoint
+        float zone_sp = setpoints[i];
+        it.printf(x + 2, 32, id(font_small), text_color, "set:%.0f", zone_sp);
 
-        // Valve status (V: observed)
-        it.printf(x + 2, 52, id(font_small), valve_open ? GREEN : GRAY, "V:%s", valve_open ? "OPN" : "cls");
-
-        // Status indicator
-        if (heating && valve_open) {
-          it.filled_circle(x + box_width/2, 70, 4, GREEN);
-        } else if (heating && !valve_open) {
-          it.filled_circle(x + box_width/2, 70, 4, ORANGE);
+        // HEAT indicator row
+        int heat_y = 48;
+        if (is_heating) {
+          it.filled_circle(x + 6, heat_y + 4, 3, RED);
         } else {
-          it.filled_circle(x + box_width/2, 70, 4, DARK_GRAY);
+          it.circle(x + 6, heat_y + 4, 3, GRAY);
+        }
+        it.print(x + 12, heat_y, id(font_tiny), is_heating ? RED : GRAY, "HEAT");
+
+        // VALV indicator row
+        int valv_y = 62;
+        if (valve_open) {
+          it.filled_circle(x + 6, valv_y + 4, 3, BLUE);
+        } else {
+          it.circle(x + 6, valv_y + 4, 3, GRAY);
+        }
+        it.print(x + 12, valv_y, id(font_tiny), valve_open ? BLUE : GRAY, "VALV");
+
+        // Draw temperature graph below box
+        int gx = x;
+        int gy = graph_y;
+        int gw = box_width - 1;
+        int gh = graph_height;
+
+        // Graph background
+        it.filled_rectangle(gx, gy, gw, gh, BLACK);
+        it.rectangle(gx, gy, gw, gh, sensor_missing ? DARK_GRAY : LIGHT_GRAY);
+
+        // Skip graph content for inactive zones (no sensor)
+        if (!sensor_missing) {
+          // Graph scale: center on zone setpoint, ±graph_range
+          float graph_min = zone_sp - graph_range;
+          float graph_max = zone_sp + graph_range;
+          float total_range = graph_range * 2.0;
+
+          // Draw setpoint line (center)
+          int sp_y = gy + gh / 2;
+          it.line(gx + 1, sp_y, gx + gw - 2, sp_y, GRAY);
+
+          // Draw hysteresis lines
+          int hyst_upper_y = gy + (int)((graph_max - (zone_sp + hyst)) / total_range * gh);
+          int hyst_lower_y = gy + (int)((graph_max - (zone_sp - hyst)) / total_range * gh);
+          if (hyst_upper_y >= gy && hyst_upper_y < gy + gh) {
+            for (int px = gx + 2; px < gx + gw - 2; px += 3) {
+              it.draw_pixel_at(px, hyst_upper_y, LIGHT_GRAY);
+            }
+          }
+          if (hyst_lower_y >= gy && hyst_lower_y < gy + gh) {
+            for (int px = gx + 2; px < gx + gw - 2; px += 3) {
+              it.draw_pixel_at(px, hyst_lower_y, LIGHT_GRAY);
+            }
+          }
+
+          // Draw temperature history line
+          float* hist = histories[i];
+          int prev_py = -1;
+          for (int s = 0; s < 40; s++) {
+            // Read from circular buffer (oldest to newest)
+            int idx = (hist_idx + s) % 40;
+            float val = hist[idx];
+            if (std::isnan(val) || val < 0 || val > 100) continue;
+
+            // Map value to pixel Y
+            int py = gy + (int)((graph_max - val) / total_range * gh);
+            py = std::max(gy + 1, std::min(gy + gh - 2, py));
+
+            // Map sample to pixel X
+            int px = gx + 1 + (s * (gw - 3)) / 39;
+
+            if (prev_py >= 0 && s > 0) {
+              it.line(gx + 1 + ((s-1) * (gw - 3)) / 39, prev_py, px, py, GREEN);
+            }
+            prev_py = py;
+          }
         }
       }
 
       // Pump box (8th position)
       int pump_x = 7 * box_width;
       bool pump_on = id(pump_relay).state;
-      Color pump_bg = pump_on ? ORANGE : DARK_GRAY;
+      Color pump_bg = pump_on ? BLUE : DARK_GRAY;
+      Color pump_outline = WHITE;
+
       it.filled_rectangle(pump_x, 0, box_width - 1, box_height, pump_bg);
-      it.rectangle(pump_x, 0, box_width - 1, box_height, WHITE);
-      it.print(pump_x + 4, 2, id(font_medium), WHITE, "PUMP");
-      it.printf(pump_x + 4, 30, id(font_large), pump_on ? GREEN : GRAY, "%s", pump_on ? "ON" : "OFF");
-      it.filled_circle(pump_x + box_width/2, 70, 4, pump_on ? GREEN : DARK_GRAY);
+      it.rectangle(pump_x, 0, box_width - 1, box_height, pump_outline);
 
-      // Status bar below zones
-      int status_y = box_height + 5;
+      // Pump label
+      it.print(pump_x + 4, 2, id(font_small), WHITE, "PUMP");
 
-      // Network status
-      it.print(5, status_y, id(font_medium), WHITE, "Network:");
+      // Pump status (large)
+      it.printf(pump_x + 6, 18, id(font_large), pump_on ? WHITE : GRAY, "%s", pump_on ? "ON" : "OFF");
+
+      // Pump demand indicator
+      int pdem_y = 48;
+      if (id(pump_demand)) {
+        it.filled_circle(pump_x + 6, pdem_y + 4, 3, ORANGE);
+      } else {
+        it.circle(pump_x + 6, pdem_y + 4, 3, GRAY);
+      }
+      it.print(pump_x + 12, pdem_y, id(font_tiny), id(pump_demand) ? ORANGE : GRAY, "DMD");
+
+      // Relay status indicator
+      int prel_y = 62;
+      if (pump_on) {
+        it.filled_circle(pump_x + 6, prel_y + 4, 3, GREEN);
+      } else {
+        it.circle(pump_x + 6, prel_y + 4, 3, GRAY);
+      }
+      it.print(pump_x + 12, prel_y, id(font_tiny), pump_on ? GREEN : GRAY, "RLY");
+
+      // Pump binary graph
+      int pgx = pump_x;
+      int pgy = graph_y;
+      int pgw = box_width - 1;
+      int pgh = graph_height;
+
+      it.filled_rectangle(pgx, pgy, pgw, pgh, BLACK);
+      it.rectangle(pgx, pgy, pgw, pgh, LIGHT_GRAY);
+
+      // Draw pump history as filled bars
+      for (int s = 0; s < 40; s++) {
+        int idx = (hist_idx + s) % 40;
+        bool on = id(pump_history)[idx];
+        int px = pgx + 1 + (s * (pgw - 3)) / 39;
+        if (on) {
+          it.line(px, pgy + 2, px, pgy + pgh - 3, BLUE);
+        }
+      }
+
+      // Status bar at bottom
+      // Line 1: Network status
+      it.print(5, status_y, id(font_small), WHITE, "Net:");
       if (wifi::global_wifi_component->is_connected()) {
-        it.print(70, status_y, id(font_medium), GREEN, "WiFi");
         auto ips = wifi::global_wifi_component->get_ip_addresses();
         if (!ips.empty()) {
-          it.printf(110, status_y, id(font_small), WHITE, "%s", ips[0].str().c_str());
+          it.printf(30, status_y, id(font_small), GREEN, "%s", ips[0].str().c_str());
         }
+        it.printf(145, status_y, id(font_tiny), GRAY, "RSSI:%d", wifi::global_wifi_component->wifi_rssi());
       } else {
-        it.print(70, status_y, id(font_medium), RED, "DISCONNECTED");
+        it.print(30, status_y, id(font_small), RED, "DISCONNECTED");
       }
 
-      // Pump demand status
-      int demand_y = status_y + 16;
-      it.print(5, demand_y, id(font_medium), WHITE, "Demand:");
-      it.printf(60, demand_y, id(font_medium), id(pump_demand) ? ORANGE : GRAY, "%s", id(pump_demand) ? "ACTIVE" : "idle");
-
-      // Valve summary
-      int any_valve = id(zone1_valve).state || id(zone2_valve).state || id(zone3_valve).state ||
-                      id(zone4_valve).state || id(zone5_valve).state || id(zone6_valve).state ||
-                      id(zone7_valve).state;
-      it.print(140, demand_y, id(font_medium), WHITE, "Valves:");
-      it.printf(195, demand_y, id(font_medium), any_valve ? GREEN : GRAY, "%s", any_valve ? "OPEN" : "closed");
-
-      // Time
-      int time_y = demand_y + 16;
+      // Line 2: Time and global setpoint
+      int line2_y = status_y + 14;
       if (id(sntp_time).now().is_valid()) {
-        it.strftime(5, time_y, id(font_medium), WHITE, "%Y-%m-%d %H:%M:%S", id(sntp_time).now());
+        it.strftime(5, line2_y, id(font_small), WHITE, "%Y-%m-%d %H:%M:%S", id(sntp_time).now());
       }
+      it.printf(200, line2_y, id(font_small), WHITE, "Set:%.1f°C", global_sp);
 
-      // Global setpoint
-      it.printf(200, time_y, id(font_medium), WHITE, "Set: %.0f°C", id(global_setpoint).state);
+      // Line 3: Demand and valve summary
+      int line3_y = line2_y + 14;
+      it.print(5, line3_y, id(font_small), WHITE, "Demand:");
+      it.printf(55, line3_y, id(font_small), id(pump_demand) ? ORANGE : GRAY, "%s", id(pump_demand) ? "ACTIVE" : "idle");
+
+      bool any_valve = valves[0] || valves[1] || valves[2] || valves[3] || valves[4] || valves[5] || valves[6];
+      it.print(120, line3_y, id(font_small), WHITE, "Valves:");
+      it.printf(170, line3_y, id(font_small), any_valve ? GREEN : GRAY, "%s", any_valve ? "OPEN" : "closed");
+
+      // Count active zones
+      int active_count = 0;
+      for (int i = 0; i < 7; i++) if (heating[i]) active_count++;
+      it.printf(240, line3_y, id(font_small), active_count > 0 ? ORANGE : GRAY, "Zones:%d", active_count);

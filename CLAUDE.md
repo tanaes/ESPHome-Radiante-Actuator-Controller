@@ -13,15 +13,15 @@ ESP32-S3 firmware for a 7-zone radiant floor heating controller using ESPHome. T
 - MCU: ESP32-S3-WROOM-1U-N16R8 (16MB flash, 8MB PSRAM)
 - 8 digital inputs (DI1-DI8) with opto-isolation
 - 8 relay outputs (DO1-DO8) via PCA9554 I2C expander
-- W5500 Ethernet + WiFi connectivity
-- Built-in RS485 and CANbus interfaces (repurposed for display SPI)
+- W5500 Ethernet + WiFi connectivity (currently using WiFi only)
+- Built-in RS485 and CANbus interfaces (unused)
 - PCF85063 RTC (unused)
 
 **External Components:**
 - Adafruit DS2484 I2C-to-1-Wire breakout (address 0x18) for temperature sensors
-- 7x DS18B20 temperature sensors on 1-Wire bus
-- WS2812 RGB status LED (GPIO38)
-- 2.2" ILI9341 TFT display (320x240, SPI)
+- DS18B20 temperature sensors on 1-Wire bus (use `index: N` for auto-discovery)
+- WS2812 RGB status LED (GPIO38) - uses RGB color order
+- 2.2" ILI9341 TFT display (240x320 native, rotated to landscape)
 
 ## Board Pin Mapping
 
@@ -30,7 +30,7 @@ ESP32-S3 firmware for a 7-zone radiant floor heating controller using ESPHome. T
 | **I2C** | | |
 | SDA | GPIO42 | PCA9554, DS2484, PCF85063 |
 | SCL | GPIO41 | |
-| **Ethernet (W5500)** | | |
+| **Ethernet (W5500)** | | Currently disabled |
 | CLK | GPIO15 | |
 | MOSI | GPIO13 | |
 | MISO | GPIO14 | |
@@ -46,11 +46,12 @@ ESP32-S3 firmware for a 7-zone radiant floor heating controller using ESPHome. T
 | **TFT Display (ILI9341)** | | SD Card header + GPIO21 |
 | CLK | GPIO48 | SD Card header |
 | MOSI | GPIO47 | SD Card header |
-| CS | GPIO45 | SD Card header |
+| CS | GPIO45 | SD Card header (strapping pin - be careful) |
 | DC | GPIO21 | |
-| RST | GPIO1 | Or tie to 3.3V |
+| RST | GPIO1 | |
+| LED/BL | 3.3V | Backlight - connect to 3.3V |
 | **Other** | | |
-| RGB LED | GPIO38 | WS2812 |
+| RGB LED | GPIO38 | WS2812, RGB order (not GRB) |
 | Buzzer | GPIO46 | Available, unused |
 
 ## Build and Deploy Commands
@@ -59,19 +60,18 @@ ESP32-S3 firmware for a 7-zone radiant floor heating controller using ESPHome. T
 # Compile firmware
 esphome compile esphome/actuator.yaml
 
-# First-time USB upload (substitute actual serial port)
-esphome upload esphome/actuator.yaml --device /dev/tty.usbserial-XXXX
+# USB upload (Mac port typically /dev/cu.usbmodem21101)
+esphome upload esphome/actuator.yaml --device /dev/cu.usbmodem21101
 
-# OTA upload (after initial flash)
+# OTA upload (after initial flash, uses mDNS)
 esphome upload esphome/actuator.yaml
+
+# View logs
+esphome logs esphome/actuator.yaml --device /dev/cu.usbmodem21101
 
 # Launch web dashboard (http://localhost:6052)
 esphome dashboard esphome
 ```
-
-Shell scripts in `scripts/` wrap these commands: `build.sh`, `upload_usb.sh`, `upload_ota.sh`, `dashboard.sh`.
-
-VS Code tasks are configured for all operations (Cmd+Shift+P → Run Task).
 
 ## Architecture
 
@@ -79,29 +79,55 @@ VS Code tasks are configured for all operations (Cmd+Shift+P → Run Task).
 
 Key sections:
 - `globals:` - `pump_demand` boolean tracking if any zone needs heat
-- `number:` - Global setpoint, pump delays, hysteresis settings
+- `number:` - Global setpoint (10-30°C), pump delays, hysteresis settings
 - `switch:` - 8 relay outputs via PCA9554 (zones 1-7 + pump)
-- `sensor:` - 7 Dallas temperature sensors (addresses need discovery)
+- `sensor:` - Dallas temperature sensors via DS2484 1-Wire bridge
 - `climate:` - 7 thermostat entities with heat deadband control
 - `binary_sensor:` - 7 valve feedback inputs (GPIO4-10) + DI8 reserved
 - `script:` - `update_pump_state` and `set_pump_demand` for pump logic
+- `interval:` - Periodic status logging (IP, temps) and LED updates
 - `display:` - ILI9341 TFT showing zone status, temps, relay/valve states, network info
 
 **Pump control logic:** Pump runs when any zone thermostat calls for heat AND that zone's valve feedback confirms open, with configurable start/stop delays to prevent cycling.
 
 ## Important Patterns
 
-- ESPHome uses `tca9554` component for PCA9554 (register-compatible)
+- ESPHome uses `pca9554` component for PCA9554 I/O expander (not `tca9554`)
 - All credentials use `!secret` references → stored in `esphome/secrets.yaml` (git-ignored)
-- Temperature displayed in Fahrenheit (sensors return Celsius, converted via filter)
+- **All temperatures in Celsius** - sensors, thermostats, display all use °C
+- Thermostat component always works in Celsius internally (no native °F support)
 - Zone 8+ expansion ready via commented XL9535 section (address 0x21)
-- Sensor addresses are placeholders - actual addresses discovered via logs after first boot
+- Use `index: N` for temperature sensors to auto-discover addresses
 - Digital inputs use 10ms debounce filter
 - IDs use snake_case: `zone1_relay`, `zone1_climate`, `zone1_temp`, etc.
+
+## Display Configuration
+
+The ILI9341 display requires specific settings:
+- `dimensions: [240, 320]` - native portrait resolution
+- `rotation: 270` - rotate to landscape mode
+- `invert_colors: false`
+- Backlight (LED pin) connects to 3.3V
+
+## LED Status Codes
+
+- **Solid Green** - WiFi connected, idle
+- **Orange Pulse** - Heating active (pump demand)
+- **Red Fast Blink** - WiFi disconnected
 
 ## First-Time Setup
 
 1. Copy `esphome/secrets.example.yaml` to `esphome/secrets.yaml` and fill in credentials
-2. Compile and flash via USB
-3. Check logs to discover actual DS18B20 sensor addresses
-4. Update sensor addresses in actuator.yaml, then OTA upload
+2. Compile and flash via USB: `esphome upload esphome/actuator.yaml --device /dev/cu.usbmodem21101`
+3. Monitor logs to verify sensor discovery and WiFi connection
+4. Access web interface at the IP shown in logs (also displayed on TFT)
+5. Temperature sensors use `index: N` for auto-discovery - update to explicit addresses for production
+
+## Troubleshooting
+
+- **Display garbled**: Check SPI wiring, ensure dimensions are [240, 320] with rotation 270
+- **Display black**: Verify backlight connected to 3.3V, check all SPI connections
+- **Sensors showing nan**: Verify DS2484 wiring, check 1-Wire bus connections
+- **Sensors showing exactly 85°C**: This is the DS18B20 power-on reset value - indicates VCC not connected or power issue. The sensor cannot complete temperature conversions without proper power. Check VCC wiring.
+- **WiFi issues**: Check secrets.yaml credentials, monitor logs for connection status
+- **GPIO45 warnings**: This is a strapping pin - safe to use but generates boot warnings
