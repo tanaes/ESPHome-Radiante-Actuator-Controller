@@ -4,6 +4,31 @@ esphome:
   on_boot:
     priority: -100
     then:
+      # Log reset reason for debugging unexpected restarts
+      - lambda: |-
+          esp_reset_reason_t reason = esp_reset_reason();
+          const char* reason_str;
+          switch (reason) {
+            case ESP_RST_POWERON:   reason_str = "Power-on reset"; break;
+            case ESP_RST_EXT:       reason_str = "External reset (RST pin)"; break;
+            case ESP_RST_SW:        reason_str = "Software reset (esp_restart)"; break;
+            case ESP_RST_PANIC:     reason_str = "Exception/panic reset"; break;
+            case ESP_RST_INT_WDT:   reason_str = "Interrupt watchdog reset"; break;
+            case ESP_RST_TASK_WDT:  reason_str = "Task watchdog reset"; break;
+            case ESP_RST_WDT:       reason_str = "Other watchdog reset"; break;
+            case ESP_RST_DEEPSLEEP: reason_str = "Deep sleep reset"; break;
+            case ESP_RST_BROWNOUT:  reason_str = "Brownout reset (low voltage)"; break;
+            case ESP_RST_SDIO:      reason_str = "SDIO reset"; break;
+            default:                reason_str = "Unknown"; break;
+          }
+          ESP_LOGW("boot", "=== RESET REASON: %s ===", reason_str);
+          if (reason == ESP_RST_PANIC || reason == ESP_RST_INT_WDT ||
+              reason == ESP_RST_TASK_WDT || reason == ESP_RST_WDT) {
+            ESP_LOGE("boot", "!!! ABNORMAL RESET DETECTED - Check for bugs !!!");
+          }
+          if (reason == ESP_RST_BROWNOUT) {
+            ESP_LOGE("boot", "!!! BROWNOUT - Check power supply !!!");
+          }
       # Initialize all zones with global setpoint on boot
       - lambda: |-
           auto setpoint = id(global_setpoint).state;
@@ -516,6 +541,35 @@ sensor:
     lambda: 'return heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024.0;'
     update_interval: 60s
     entity_category: diagnostic
+
+  - platform: uptime
+    name: "Uptime"
+    id: uptime_sensor
+    update_interval: 60s
+    entity_category: diagnostic
+
+# Text sensors for diagnostic info
+text_sensor:
+  - platform: template
+    name: "Last Reset Reason"
+    id: reset_reason_sensor
+    entity_category: diagnostic
+    lambda: |-
+      esp_reset_reason_t reason = esp_reset_reason();
+      switch (reason) {
+        case ESP_RST_POWERON:   return {"Power-on"};
+        case ESP_RST_EXT:       return {"External reset"};
+        case ESP_RST_SW:        return {"Software reset"};
+        case ESP_RST_PANIC:     return {"Exception/panic"};
+        case ESP_RST_INT_WDT:   return {"Interrupt watchdog"};
+        case ESP_RST_TASK_WDT:  return {"Task watchdog"};
+        case ESP_RST_WDT:       return {"Watchdog"};
+        case ESP_RST_DEEPSLEEP: return {"Deep sleep"};
+        case ESP_RST_BROWNOUT:  return {"Brownout"};
+        case ESP_RST_SDIO:      return {"SDIO"};
+        default:                return {"Unknown"};
+      }
+    update_interval: never
 
 # Thermostat climate entities for each zone
 climate:
