@@ -29,16 +29,19 @@ esphome:
           if (reason == ESP_RST_BROWNOUT) {
             ESP_LOGE("boot", "!!! BROWNOUT - Check power supply !!!");
           }
-      # Initialize all zones with global setpoint on boot
+      # Restore per-zone setpoints from persistent storage
       - lambda: |-
-          auto setpoint = id(global_setpoint).state;
-          id(zone1_climate).target_temperature = setpoint;
-          id(zone2_climate).target_temperature = setpoint;
-          id(zone3_climate).target_temperature = setpoint;
-          id(zone4_climate).target_temperature = setpoint;
-          id(zone5_climate).target_temperature = setpoint;
-          id(zone6_climate).target_temperature = setpoint;
-          id(zone7_climate).target_temperature = setpoint;
+          // Restore each zone's saved setpoint
+          id(zone1_climate).target_temperature = id(zone1_setpoint);
+          id(zone2_climate).target_temperature = id(zone2_setpoint);
+          id(zone3_climate).target_temperature = id(zone3_setpoint);
+          id(zone4_climate).target_temperature = id(zone4_setpoint);
+          id(zone5_climate).target_temperature = id(zone5_setpoint);
+          id(zone6_climate).target_temperature = id(zone6_setpoint);
+          id(zone7_climate).target_temperature = id(zone7_setpoint);
+          ESP_LOGI("boot", "Restored zone setpoints: %.1f, %.1f, %.1f, %.1f, %.1f, %.1f, %.1f",
+                   id(zone1_setpoint), id(zone2_setpoint), id(zone3_setpoint), id(zone4_setpoint),
+                   id(zone5_setpoint), id(zone6_setpoint), id(zone7_setpoint));
 
 # Global variable to track if pump should be running
 globals:
@@ -100,6 +103,46 @@ globals:
   - id: zone_valve_timeout
     type: int[7]
     restore_value: no
+
+  # Failsafe: how long zone has been at error score 100 (in 30s intervals)
+  - id: zone_error_hold_time
+    type: int[7]
+    restore_value: no
+
+  # Failsafe: zone disabled flag (set when error persists, prevents heating)
+  - id: zone_disabled
+    type: bool[7]
+    restore_value: no
+
+  # Per-zone setpoints (persistent across reboots)
+  - id: zone1_setpoint
+    type: float
+    restore_value: true
+    initial_value: '20.0'
+  - id: zone2_setpoint
+    type: float
+    restore_value: true
+    initial_value: '20.0'
+  - id: zone3_setpoint
+    type: float
+    restore_value: true
+    initial_value: '20.0'
+  - id: zone4_setpoint
+    type: float
+    restore_value: true
+    initial_value: '20.0'
+  - id: zone5_setpoint
+    type: float
+    restore_value: true
+    initial_value: '20.0'
+  - id: zone6_setpoint
+    type: float
+    restore_value: true
+    initial_value: '20.0'
+  - id: zone7_setpoint
+    type: float
+    restore_value: true
+    initial_value: '20.0'
 
 # Waveshare ESP32-S3-ETH-8DI-8RO board
 # https://devices.esphome.io/devices/waveshare-esp32-s3-eth-8di-8do/
@@ -255,6 +298,45 @@ number:
     step: 0.5
     initial_value: 0.5
     restore_value: false  # Disabled to reset from old °F values
+
+  # Failsafe: how long (minutes) to wait at error score 100 before disabling zone
+  - platform: template
+    name: "Error Disable Delay"
+    id: error_disable_delay
+    unit_of_measurement: "min"
+    optimistic: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    initial_value: 5
+    restore_value: true
+
+# Button to reset failsafe errors and re-enable all zones
+button:
+  - platform: template
+    name: "Reset All Zone Errors"
+    id: reset_zone_errors
+    icon: "mdi:refresh"
+    on_press:
+      - lambda: |-
+          ESP_LOGI("failsafe", "Resetting all zone error scores and re-enabling zones");
+          for (int i = 0; i < 7; i++) {
+            id(zone_error_scores)[i] = 0;
+            id(zone_error_hold_time)[i] = 0;
+            id(zone_disabled)[i] = false;
+          }
+          // Re-engage relays for zones that are actively heating
+          if (id(zone1_climate).action == climate::CLIMATE_ACTION_HEATING) id(zone1_relay).turn_on();
+          if (id(zone2_climate).action == climate::CLIMATE_ACTION_HEATING) id(zone2_relay).turn_on();
+          if (id(zone3_climate).action == climate::CLIMATE_ACTION_HEATING) id(zone3_relay).turn_on();
+          if (id(zone4_climate).action == climate::CLIMATE_ACTION_HEATING) id(zone4_relay).turn_on();
+          if (id(zone5_climate).action == climate::CLIMATE_ACTION_HEATING) id(zone5_relay).turn_on();
+          if (id(zone6_climate).action == climate::CLIMATE_ACTION_HEATING) id(zone6_relay).turn_on();
+          if (id(zone7_climate).action == climate::CLIMATE_ACTION_HEATING) id(zone7_relay).turn_on();
+      - script.execute: set_pump_demand
+
+  - platform: restart
+    name: "Restart Controller"
 
 # Internal relay switches via PCA9554 expander
 switch:
@@ -592,6 +674,11 @@ climate:
     idle_action:
       - switch.turn_off: zone1_relay
       - script.execute: set_pump_demand
+    on_control:
+      - lambda: |-
+          if (x.get_target_temperature().has_value()) {
+            id(zone1_setpoint) = x.get_target_temperature().value();
+          }
     visual:
       min_temperature: 10  # 50°F
       max_temperature: 30  # 86°F
@@ -616,6 +703,11 @@ climate:
     idle_action:
       - switch.turn_off: zone2_relay
       - script.execute: set_pump_demand
+    on_control:
+      - lambda: |-
+          if (x.get_target_temperature().has_value()) {
+            id(zone2_setpoint) = x.get_target_temperature().value();
+          }
     visual:
       min_temperature: 10  # 50°F
       max_temperature: 30  # 86°F
@@ -640,6 +732,11 @@ climate:
     idle_action:
       - switch.turn_off: zone3_relay
       - script.execute: set_pump_demand
+    on_control:
+      - lambda: |-
+          if (x.get_target_temperature().has_value()) {
+            id(zone3_setpoint) = x.get_target_temperature().value();
+          }
     visual:
       min_temperature: 10  # 50°F
       max_temperature: 30  # 86°F
@@ -664,6 +761,11 @@ climate:
     idle_action:
       - switch.turn_off: zone4_relay
       - script.execute: set_pump_demand
+    on_control:
+      - lambda: |-
+          if (x.get_target_temperature().has_value()) {
+            id(zone4_setpoint) = x.get_target_temperature().value();
+          }
     visual:
       min_temperature: 10  # 50°F
       max_temperature: 30  # 86°F
@@ -688,6 +790,11 @@ climate:
     idle_action:
       - switch.turn_off: zone5_relay
       - script.execute: set_pump_demand
+    on_control:
+      - lambda: |-
+          if (x.get_target_temperature().has_value()) {
+            id(zone5_setpoint) = x.get_target_temperature().value();
+          }
     visual:
       min_temperature: 10  # 50°F
       max_temperature: 30  # 86°F
@@ -712,6 +819,11 @@ climate:
     idle_action:
       - switch.turn_off: zone6_relay
       - script.execute: set_pump_demand
+    on_control:
+      - lambda: |-
+          if (x.get_target_temperature().has_value()) {
+            id(zone6_setpoint) = x.get_target_temperature().value();
+          }
     visual:
       min_temperature: 10  # 50°F
       max_temperature: 30  # 86°F
@@ -736,6 +848,11 @@ climate:
     idle_action:
       - switch.turn_off: zone7_relay
       - script.execute: set_pump_demand
+    on_control:
+      - lambda: |-
+          if (x.get_target_temperature().has_value()) {
+            id(zone7_setpoint) = x.get_target_temperature().value();
+          }
     visual:
       min_temperature: 10  # 50°F
       max_temperature: 30  # 86°F
@@ -898,6 +1015,49 @@ binary_sensor:
     device_class: running
     lambda: |-
       return id(pump_relay).state;
+
+  # Zone disabled status (failsafe triggered)
+  - platform: template
+    name: "Zone 1 Disabled"
+    id: zone1_disabled
+    device_class: problem
+    lambda: 'return id(zone_disabled)[0];'
+
+  - platform: template
+    name: "Zone 2 Disabled"
+    id: zone2_disabled
+    device_class: problem
+    lambda: 'return id(zone_disabled)[1];'
+
+  - platform: template
+    name: "Zone 3 Disabled"
+    id: zone3_disabled
+    device_class: problem
+    lambda: 'return id(zone_disabled)[2];'
+
+  - platform: template
+    name: "Zone 4 Disabled"
+    id: zone4_disabled
+    device_class: problem
+    lambda: 'return id(zone_disabled)[3];'
+
+  - platform: template
+    name: "Zone 5 Disabled"
+    id: zone5_disabled
+    device_class: problem
+    lambda: 'return id(zone_disabled)[4];'
+
+  - platform: template
+    name: "Zone 6 Disabled"
+    id: zone6_disabled
+    device_class: problem
+    lambda: 'return id(zone_disabled)[5];'
+
+  - platform: template
+    name: "Zone 7 Disabled"
+    id: zone7_disabled
+    device_class: problem
+    lambda: 'return id(zone_disabled)[6];'
 
 # Pump control scripts
 script:
@@ -1178,6 +1338,39 @@ interval:
             if (id(zone_error_scores)[i] >= ERROR_THRESHOLD) {
               ESP_LOGE("failsafe", "Zone %d: SAFETY ERROR (score=%d)", i + 1, id(zone_error_scores)[i]);
             }
+
+            // --- Zone disable logic ---
+            // Convert delay from minutes to 30s intervals
+            int disable_threshold = (int)(id(error_disable_delay).state * 2);  // minutes * 2 = 30s intervals
+
+            if (id(zone_error_scores)[i] >= 100) {
+              // Error score at max - increment hold time
+              id(zone_error_hold_time)[i]++;
+
+              if (id(zone_error_hold_time)[i] >= disable_threshold && !id(zone_disabled)[i]) {
+                // Disable the zone
+                id(zone_disabled)[i] = true;
+                ESP_LOGE("failsafe", "Zone %d: DISABLED due to persistent errors (held at 100 for %d intervals)",
+                         i + 1, id(zone_error_hold_time)[i]);
+              }
+            } else {
+              // Error score below max - reset hold time
+              id(zone_error_hold_time)[i] = 0;
+            }
+
+            // Force relay off if zone is disabled
+            if (id(zone_disabled)[i] && relay_on) {
+              ESP_LOGW("failsafe", "Zone %d: Forcing relay OFF (zone disabled)", i + 1);
+              switch (i) {
+                case 0: id(zone1_relay).turn_off(); break;
+                case 1: id(zone2_relay).turn_off(); break;
+                case 2: id(zone3_relay).turn_off(); break;
+                case 3: id(zone4_relay).turn_off(); break;
+                case 4: id(zone5_relay).turn_off(); break;
+                case 5: id(zone6_relay).turn_off(); break;
+                case 6: id(zone7_relay).turn_off(); break;
+              }
+            }
           }
 
 # SPI bus for TFT display (using SD Card header pins)
@@ -1295,13 +1488,18 @@ display:
         bool sensor_missing = std::isnan(temp);
         bool sensor_error = (!sensor_missing && (temp >= 84.5 && temp <= 85.5));  // 85°C = power-on reset
         bool safety_error = (id(zone_error_scores)[i] >= 50);  // Error score threshold
+        bool is_disabled = id(zone_disabled)[i];  // Zone disabled by failsafe
 
         // Determine colors based on status
         Color outline_color = WHITE;
         Color text_color = WHITE;
         Color bg_color = DARK_GRAY;
 
-        if (sensor_missing) {
+        if (is_disabled) {
+          // Disabled zone - dark red background with red outline
+          bg_color = Color(80, 0, 0);
+          outline_color = RED;
+        } else if (sensor_missing) {
           outline_color = GRAY;
           text_color = GRAY;
         } else if (sensor_error) {
@@ -1318,6 +1516,11 @@ display:
 
         // Zone number (top left, tiny)
         it.printf(x + 2, 1, id(font_tiny), text_color, "Z%d", i + 1);
+
+        // Show "DIS" indicator if zone is disabled
+        if (is_disabled) {
+          it.print(x + 22, 1, id(font_tiny), RED, "DIS");
+        }
 
         // Temperature (large, centered)
         if (!sensor_missing) {
