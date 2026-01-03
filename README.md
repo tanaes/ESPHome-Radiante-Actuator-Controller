@@ -13,7 +13,6 @@ ESP32-S3 firmware for a 7-zone radiant floor heating controller using ESPHome. T
 **External Components:**
 - Adafruit DS2484 I2C-to-1-Wire breakout for temperature sensors
 - DS18B20 temperature sensors on 1-Wire bus (one per zone)
-- WS2812 RGB status LED
 - 2.2" ILI9341 TFT display (320x240)
 
 ## Prerequisites (macOS)
@@ -107,12 +106,15 @@ Each zone box shows:
 ### Display States
 
 **Idle Operation:**
+
 ![Idle display](docs/images/display_idle.png)
 
 **Active Heating:**
+
 ![Heating display](docs/images/display_heating.png)
 
 **Error Conditions:**
+
 ![Error display](docs/images/display_error.png)
 
 ### Web Interface
