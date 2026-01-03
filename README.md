@@ -48,12 +48,16 @@ pip install Pillow
    esphome upload esphome/actuator.yaml --device /dev/tty.usbserial-XXXX
    ```
 
-4. **OTA uploads (after initial flash):**
+4. **Discover sensor addresses:** See [Sensor Discovery](#sensor-discovery) below to identify DS18B20 addresses for each zone.
+
+5. **Update sensor addresses:** Edit `esphome/actuator.yaml` with the discovered addresses for each zone sensor, then recompile and upload.
+
+6. **OTA uploads (after initial flash):**
    ```zsh
    esphome upload esphome/actuator.yaml
    ```
 
-5. **Dashboard (local UI):**
+7. **Dashboard (local UI):**
    ```zsh
    esphome dashboard esphome
    ```
@@ -152,6 +156,37 @@ The controller exposes the following entities via the ESPHome API:
 - `number.error_disable_delay` - Time at error score 100 before disabling (minutes)
 - `button.reset_all_zone_errors` - Clear error scores and re-enable zones
 - `button.restart_controller` - Reboot the controller
+- `button.scan_1_wire_sensors` - Discover all sensors on the 1-Wire bus
+
+**Diagnostics:**
+- `sensor.discovered_sensor_count` - Number of sensors found on last scan
+- `text_sensor.discovered_1_wire_sensors` - List of all discovered sensors with addresses and temperatures
+
+## Sensor Discovery
+
+The controller includes a built-in sensor discovery feature for identifying DS18B20 temperature sensor addresses on the 1-Wire bus.
+
+### Using Sensor Discovery
+
+1. **Trigger a scan:** Press the "Scan 1-Wire Sensors" button in Home Assistant or the web interface
+2. **View results:** Check the "Discovered 1-Wire Sensors" text sensor, which displays:
+   ```
+   00: 0x28FF1234567890AB  21.5°C
+   01: 0x28FF2345678901BC  19.8°C
+   02: 0x28FF3456789012CD  22.1°C
+   ...
+   ```
+3. **Identify sensors:** Heat individual sensors (hold in hand, apply warm air) and watch temperatures change to determine which address corresponds to which physical location
+4. **Update configuration:** Copy the desired address and update `esphome/actuator.yaml`:
+   ```yaml
+   - platform: dallas_temp
+     one_wire_id: onewire_bus
+     address: 0x28FF1234567890AB  # Paste address here
+     name: "Zone 1 Temperature"
+   ```
+5. **Deploy:** Recompile and upload the firmware
+
+The discovery feature supports up to 30 sensors on a single 1-Wire bus.
 
 ## Safety Features
 
@@ -289,6 +324,6 @@ This recreates the TFT display mockups using the same rendering logic as the act
 ## Notes
 
 - `esphome/secrets.yaml` is git-ignored - keep it safe
-- Sensor addresses are discovered on first boot - check logs and update yaml
+- Use the "Scan 1-Wire Sensors" button to discover sensor addresses (see [Sensor Discovery](#sensor-discovery))
 - Temperature displayed in Celsius throughout
 - Zone 8+ expansion available via commented XL9535 section

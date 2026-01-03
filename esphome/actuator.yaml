@@ -144,6 +144,18 @@ globals:
     restore_value: true
     initial_value: '20.0'
 
+  # Commissioning: discovered sensor addresses (up to 30 sensors)
+  # Stored as uint64_t for 1-Wire addresses
+  - id: discovered_addresses
+    type: uint64_t[30]
+    restore_value: false
+
+  # Commissioning: number of sensors found
+  - id: discovered_count
+    type: int
+    restore_value: false
+    initial_value: '0'
+
 # Waveshare ESP32-S3-ETH-8DI-8RO board
 # https://devices.esphome.io/devices/waveshare-esp32-s3-eth-8di-8do/
 esp32:
@@ -337,6 +349,14 @@ button:
 
   - platform: restart
     name: "Restart Controller"
+
+  # Sensor discovery button - scans 1-Wire bus and populates text sensors
+  - platform: template
+    name: "Scan 1-Wire Sensors"
+    id: scan_sensors
+    icon: "mdi:magnify"
+    on_press:
+      - script.execute: discover_sensors
 
 # Internal relay switches via PCA9554 expander
 switch:
@@ -630,6 +650,16 @@ sensor:
     update_interval: 60s
     entity_category: diagnostic
 
+  # Number of 1-Wire sensors discovered on last scan
+  - platform: template
+    name: "Discovered Sensor Count"
+    id: discovered_sensor_count
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    lambda: 'return id(discovered_count);'
+    update_interval: never
+    entity_category: diagnostic
+
 # Text sensors for diagnostic info
 text_sensor:
   - platform: template
@@ -651,6 +681,15 @@ text_sensor:
         case ESP_RST_SDIO:      return {"SDIO"};
         default:                return {"Unknown"};
       }
+    update_interval: never
+
+  # Discovered 1-Wire sensors - shows all sensors with addresses and temperatures
+  # Updated when "Scan 1-Wire Sensors" button is pressed
+  - platform: template
+    name: "Discovered 1-Wire Sensors"
+    id: discovered_sensors_list
+    icon: "mdi:thermometer-lines"
+    entity_category: diagnostic
     update_interval: never
 
 # Thermostat climate entities for each zone
@@ -1140,6 +1179,104 @@ script:
           id(pump_demand) = demand;
           ESP_LOGI("pump", "Pump demand updated: %s", demand ? "true" : "false");
       - script.execute: update_pump_state
+
+  # Sensor discovery script - scans 1-Wire bus, reads temps, and updates text sensor
+  - id: discover_sensors
+    mode: restart
+    then:
+      - lambda: |-
+          ESP_LOGI("discover", "Starting 1-Wire sensor discovery...");
+
+          // Trigger a bus search to find all devices
+          id(onewire_bus)->search();
+
+          // Get all devices from the 1-Wire bus
+          auto& devices = id(onewire_bus)->get_devices();
+          int count = 0;
+
+          // Clear existing addresses
+          for (int i = 0; i < 30; i++) {
+            id(discovered_addresses)[i] = 0;
+          }
+
+          // Store discovered addresses
+          for (auto &device : devices) {
+            if (count >= 30) break;  // Max 30 sensors
+            id(discovered_addresses)[count] = device;
+            count++;
+          }
+
+          id(discovered_count) = count;
+          ESP_LOGI("discover", "Found %d sensors, starting temperature conversion...", count);
+
+          // Trigger temperature conversion on all sensors (broadcast via skip)
+          id(onewire_bus)->skip();  // Addresses all devices (includes reset)
+          id(onewire_bus)->write8(0x44);  // Convert T command
+
+      # Wait for temperature conversion (750ms for 12-bit resolution)
+      - delay: 800ms
+
+      - lambda: |-
+          ESP_LOGI("discover", "Reading temperatures...");
+
+          int count = id(discovered_count);
+
+          if (count == 0) {
+            id(discovered_sensors_list).publish_state("No sensors found on 1-Wire bus");
+            return;
+          }
+
+          std::string result = "";
+
+          for (int i = 0; i < count; i++) {
+            uint64_t addr = id(discovered_addresses)[i];
+            if (addr == 0) continue;
+
+            // Read temperature from scratchpad
+            float temp = NAN;
+            if (id(onewire_bus)->select(addr)) {  // Select includes reset
+              id(onewire_bus)->write8(0xBE);  // Read scratchpad
+
+              uint8_t data[9];
+              for (int j = 0; j < 9; j++) {
+                data[j] = id(onewire_bus)->read8();
+              }
+
+              // Calculate CRC (Dallas 1-Wire CRC)
+              uint8_t crc = 0;
+              for (int j = 0; j < 8; j++) {
+                uint8_t byte = data[j];
+                for (int k = 0; k < 8; k++) {
+                  uint8_t mix = (crc ^ byte) & 0x01;
+                  crc >>= 1;
+                  if (mix) crc ^= 0x8C;
+                  byte >>= 1;
+                }
+              }
+
+              if (crc == data[8]) {
+                int16_t raw = (data[1] << 8) | data[0];
+                temp = raw / 16.0f;
+              }
+            }
+
+            // Format line: index, address, temperature
+            char line[100];
+            if (!std::isnan(temp) && temp > -55 && temp < 125) {
+              snprintf(line, sizeof(line), "%02d: 0x%016llX  %.1f°C", i, addr, temp);
+              ESP_LOGI("discover", "Sensor %d: 0x%016llX = %.1f°C", i, addr, temp);
+            } else {
+              snprintf(line, sizeof(line), "%02d: 0x%016llX  --.-°C", i, addr);
+              ESP_LOGW("discover", "Sensor %d: 0x%016llX = read error", i, addr);
+            }
+
+            if (i > 0) result += "\n";
+            result += line;
+          }
+
+          id(discovered_sensors_list).publish_state(result);
+          id(discovered_sensor_count).publish_state(count);
+          ESP_LOGI("discover", "Discovery complete: %d sensors", count);
 
 # RGB status LED (WS2812)
 light:
