@@ -227,6 +227,7 @@ pca9554:
 one_wire:
   - platform: ds2484
     id: onewire_bus
+    active_pullup: true
 
 # Global setpoint that can be applied to all zones (in Celsius)
 number:
@@ -464,12 +465,12 @@ switch:
 #   # ... continue for zones 10-16 on pins 2-7 and 8-15
 
 # Dallas/DS18B20 temperature sensors on the 1-wire bus
-# NOTE: Replace the 0x0000000000000000 addresses with your actual sensor addresses
-# Run once with these placeholders, check logs for discovered addresses, then update
+# NOTE: Replace placeholder addresses with actual sensor addresses
+# Use "Scan 1-Wire Sensors" button in HA/web interface to discover addresses
 sensor:
   - platform: dallas_temp
     one_wire_id: onewire_bus
-    index: 0  # First discovered sensor - check logs for actual address
+    address: 0xEB00001059DD6728
     name: "Zone 1 Temperature"
     id: zone1_temp
     unit_of_measurement: "°C"
@@ -480,7 +481,7 @@ sensor:
 
   - platform: dallas_temp
     one_wire_id: onewire_bus
-    index: 1  # Second discovered sensor - check logs for actual address
+    address: 0x090000105AE07428
     name: "Zone 2 Temperature"
     id: zone2_temp
     unit_of_measurement: "°C"
@@ -491,7 +492,7 @@ sensor:
 
   - platform: dallas_temp
     one_wire_id: onewire_bus
-    address: 0x0000000000000003  # Replace with actual address
+    address: 0x7E00001059DED328
     name: "Zone 3 Temperature"
     id: zone3_temp
     unit_of_measurement: "°C"
@@ -502,7 +503,7 @@ sensor:
 
   - platform: dallas_temp
     one_wire_id: onewire_bus
-    address: 0x0000000000000004  # Replace with actual address
+    address: 0x310000105AE4ED28
     name: "Zone 4 Temperature"
     id: zone4_temp
     unit_of_measurement: "°C"
@@ -513,7 +514,7 @@ sensor:
 
   - platform: dallas_temp
     one_wire_id: onewire_bus
-    address: 0x0000000000000005  # Replace with actual address
+    address: 0xFF0000105AE9D728
     name: "Zone 5 Temperature"
     id: zone5_temp
     unit_of_measurement: "°C"
@@ -524,7 +525,7 @@ sensor:
 
   - platform: dallas_temp
     one_wire_id: onewire_bus
-    address: 0x0000000000000006  # Replace with actual address
+    address: 0xA90000105B4E1828
     name: "Zone 6 Temperature"
     id: zone6_temp
     unit_of_measurement: "°C"
@@ -535,7 +536,7 @@ sensor:
 
   - platform: dallas_temp
     one_wire_id: onewire_bus
-    address: 0x0000000000000007  # Replace with actual address
+    address: 0xB30000105B53E328
     name: "Zone 7 Temperature"
     id: zone7_temp
     unit_of_measurement: "°C"
@@ -843,10 +844,10 @@ climate:
     name: "Zone 6 Thermostat"
     id: zone6_climate
     sensor: zone6_temp
-    default_preset: Home
+    default_preset: Garage
     preset:
-      - name: Home
-        default_target_temperature_low: 20  # 68°F
+      - name: Garage
+        default_target_temperature_low: 10  # 50°F
     min_heating_off_time: 60s
     min_heating_run_time: 60s
     min_idle_time: 30s
@@ -864,8 +865,8 @@ climate:
             id(zone6_setpoint) = x.get_target_temperature().value();
           }
     visual:
-      min_temperature: 10  # 50°F
-      max_temperature: 30  # 86°F
+      min_temperature: 5  # 41°F
+      max_temperature: 25  # 77°F
       temperature_step: 0.5
 
   - platform: thermostat
