@@ -196,6 +196,7 @@ wifi:
   ap:
     ssid: "RadiantHeat Fallback"
     password: !secret fallback_ap_password
+    ap_timeout: 1min # How long to try main WiFi before enabling AP
 
 captive_portal:
 
@@ -1400,7 +1401,7 @@ interval:
 
           // Thresholds
           const int VALVE_TIMEOUT_THRESHOLD = 20;     // 20 * 30s = 10 minutes
-          const int HEAT_CHECK_DELAY = 10;            // Wait 10 * 30s = 5 min before checking temp rise
+          const int HEAT_CHECK_DELAY = 60;            // Wait 60 * 30s = 30 minutes before checking temp rise
           const float MIN_TEMP_RISE = 0.2;            // Expect at least 0.2°C rise
           const int ERROR_THRESHOLD = 50;             // Error score threshold for safety flag
           const int ERROR_INCREMENT = 5;              // Points added per failure
